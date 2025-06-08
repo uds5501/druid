@@ -118,7 +118,8 @@ public class JettyHttpClientModule implements Module {
             this.threadPool = pool;
             pool.setName(JettyHttpClientModule.class.getSimpleName() + "-threadPool-" + pool.hashCode());
             httpClient.setExecutor(pool);
-
+            httpClient.getRequestListeners().add(new CustomRequestListener(annotationName));
+            System.out.println("Max requests per connection for client - " + httpClient.getMaxConnectionsPerDestination());
             final Lifecycle lifecycle = getLifecycleProvider().get();
 
             try {

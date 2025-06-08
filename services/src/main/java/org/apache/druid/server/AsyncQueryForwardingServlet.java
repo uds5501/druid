@@ -112,7 +112,7 @@ public class AsyncQueryForwardingServlet extends AsyncProxyServlet implements Qu
     private static final String PROPERTY_SQL_ENABLE_DEFAULT = "false";
 
     private static final long CANCELLATION_TIMEOUT_MILLIS = TimeUnit.SECONDS.toMillis(5);
-    private static final long CANCELLATION_TIMEOUT_TEMPORARY_MILLIS = TimeUnit.SECONDS.toMillis(30);
+    private static final long CANCELLATION_TIMEOUT_TEMPORARY_MILLIS = TimeUnit.SECONDS.toMillis(1);
 
     private final AtomicLong successfulQueryCount = new AtomicLong();
     private final AtomicLong failedQueryCount = new AtomicLong();
@@ -239,11 +239,11 @@ public class AsyncQueryForwardingServlet extends AsyncProxyServlet implements Qu
 
     @Override
     protected void service(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-        try {
-            Thread.sleep(5000);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
+//        try {
+//            Thread.sleep(5000);
+//        } catch (InterruptedException e) {
+//            throw new RuntimeException(e);
+//        }
         final boolean isSmile = SmileMediaTypes.APPLICATION_JACKSON_SMILE.equals(request.getContentType())
                 || APPLICATION_SMILE.equals(request.getContentType());
         final ObjectMapper objectMapper = isSmile ? smileMapper : jsonMapper;
