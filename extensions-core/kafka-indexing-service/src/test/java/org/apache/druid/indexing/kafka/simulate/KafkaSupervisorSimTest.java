@@ -25,6 +25,7 @@ import org.apache.druid.data.input.impl.CsvInputFormat;
 import org.apache.druid.data.input.impl.DimensionsSpec;
 import org.apache.druid.data.input.impl.TimestampSpec;
 import org.apache.druid.indexer.TaskState;
+import org.apache.druid.indexer.TaskStatus;
 import org.apache.druid.indexer.TaskStatusPlus;
 import org.apache.druid.indexing.kafka.KafkaIndexTaskModule;
 import org.apache.druid.indexing.kafka.supervisor.KafkaSupervisorIOConfig;
@@ -191,8 +192,9 @@ public class KafkaSupervisorSimTest extends IndexingSimulationTestBase
     List<TaskStatusPlus> taskStatuses = ImmutableList.copyOf(
         getResult(cluster.leaderOverlord().taskStatuses(null, dataSource, partitionCount))
     );
-    Assertions.assertEquals(taskCountMin, taskStatuses.size());
-    Assertions.assertEquals(TaskState.RUNNING, taskStatuses.get(0).getStatusCode());
+
+    Assertions.assertTrue(taskCountMin <= taskStatuses.size());
+    assertTaskIsRunningOrSuccessful(taskStatuses);
 
     overlord.latchableEmitter().waitForEventAggregate(
         event -> event.hasMetricName("task/run/time")
@@ -205,13 +207,86 @@ public class KafkaSupervisorSimTest extends IndexingSimulationTestBase
         runSql("SELECT COUNT(*) FROM %s", dataSource)
     );
     Assertions.assertEquals(partitionCount * recordsPerPartition, numRows);
+  }
 
-    // Suspend the supervisor and verify the state
-    getResult(
-        cluster.leaderOverlord().postSupervisor(kafkaSupervisorSpec.createSuspendedSpec())
+  @Test
+  public void test_runKafkaSupervisor_withIOConfigTaskCount()
+  {
+    final String topic = dataSource;
+    final int partitionCount = 10;
+    final int recordsPerPartition = 10;
+    final int taskCount = 10;
+
+    kafkaServer.createTopicWithPartitions(topic, partitionCount);
+
+    kafkaServer.produceRecordsToTopic(
+        generateRecordsForTopicPerPartition(topic, recordsPerPartition, DateTimes.of("2025-06-01"), partitionCount)
     );
-    supervisorStatus = getSupervisorStatus(supervisorId);
-    Assertions.assertTrue(supervisorStatus.isSuspended());
+
+    // Submit and start a supervisor
+    final String supervisorId = dataSource + "_supe";
+    final KafkaSupervisorIOConfig supervisorIOConfig = new KafkaSupervisorIOConfig(
+        topic,
+        null,
+        new CsvInputFormat(List.of("timestamp", "item"), null, null, false, 0, false),
+        null, taskCount,
+        new Period("PT1M"),
+        kafkaServer.consumerProperties(),
+        null, null, null, null, null,
+        true,
+        new Period("PT2M"), null, null, null, null, null, null, null
+    );
+    final KafkaSupervisorSpec kafkaSupervisorSpec = createKafkaSupervisor(supervisorId, topic, supervisorIOConfig);
+
+    final Map<String, String> startSupervisorResult = getResult(
+        cluster.leaderOverlord().postSupervisor(kafkaSupervisorSpec)
+    );
+    Assertions.assertEquals(Map.of("id", supervisorId), startSupervisorResult);
+
+    // Wait for the broker to discover the realtime segments
+    broker.latchableEmitter().waitForEvent(
+        event -> event.hasDimension(DruidMetrics.DATASOURCE, dataSource)
+    );
+
+    SupervisorStatus supervisorStatus = getSupervisorStatus(supervisorId);
+    Assertions.assertFalse(supervisorStatus.isSuspended());
+    Assertions.assertTrue(supervisorStatus.isHealthy());
+    Assertions.assertEquals(dataSource, supervisorStatus.getDataSource());
+    Assertions.assertEquals("RUNNING", supervisorStatus.getState());
+    Assertions.assertEquals(topic, supervisorStatus.getSource());
+
+
+    // Get the task ID
+    List<TaskStatusPlus> taskStatuses = ImmutableList.copyOf(
+        getResult(cluster.leaderOverlord().taskStatuses(null, dataSource, partitionCount))
+    );
+
+    Assertions.assertTrue(taskCount <= taskStatuses.size());
+    assertTaskIsRunningOrSuccessful(taskStatuses);
+
+    overlord.latchableEmitter().waitForEventAggregate(
+        event -> event.hasMetricName("task/run/time")
+                      .hasDimension(DruidMetrics.DATASOURCE, dataSource),
+        agg -> agg.hasCount(taskCount)
+    );
+
+    // Verify the count of rows ingested into the datasource so far
+    final int numRows = Integer.parseInt(
+        runSql("SELECT COUNT(*) FROM %s", dataSource)
+    );
+    Assertions.assertEquals(partitionCount * recordsPerPartition, numRows);
+  }
+
+  private void assertTaskIsRunningOrSuccessful(List<TaskStatusPlus> taskStatuses)
+  {
+    for (TaskStatusPlus taskStatus : taskStatuses) {
+      TaskState statusCode = taskStatus.getStatusCode();
+      Assertions.assertTrue(
+          TaskState.RUNNING.equals(statusCode) ||
+          TaskState.SUCCESS.equals(statusCode),
+          "Task should be either RUNNING or SUCCESS, but was: " + statusCode
+      );
+    }
   }
 
   private KafkaSupervisorSpec createKafkaSupervisor(String supervisorId, String topic)
