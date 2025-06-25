@@ -8,12 +8,14 @@ import org.apache.druid.java.util.common.StringUtils;
 import org.apache.druid.metadata.TestDerbyConnector;
 import org.apache.druid.query.DruidMetrics;
 import org.apache.druid.server.coordinator.rules.ForeverBroadcastDistributionRule;
+import org.apache.druid.storage.s3.S3StorageDruidModule;
 import org.apache.druid.testing.simulate.EmbeddedBroker;
 import org.apache.druid.testing.simulate.EmbeddedCoordinator;
 import org.apache.druid.testing.simulate.EmbeddedDruidCluster;
 import org.apache.druid.testing.simulate.EmbeddedHistorical;
 import org.apache.druid.testing.simulate.EmbeddedIndexer;
 import org.apache.druid.testing.simulate.EmbeddedOverlord;
+import org.apache.druid.testing.simulate.EmbeddedRouter;
 import org.apache.druid.testing.simulate.junit5.IndexingSimulationTestBase;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,7 +24,6 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
 
 public class BroadcastJoinQuerySimTest extends IndexingSimulationTestBase
 {
@@ -38,18 +39,21 @@ public class BroadcastJoinQuerySimTest extends IndexingSimulationTestBase
   private final EmbeddedOverlord overlord = new EmbeddedOverlord();
   private final EmbeddedHistorical historical = new EmbeddedHistorical();
   private final EmbeddedCoordinator coordinator = new EmbeddedCoordinator();
-  private EmbeddedKafkaServer kafkaServer;
 
   @Override
   public EmbeddedDruidCluster createCluster()
   {
     final EmbeddedDruidCluster cluster = EmbeddedDruidCluster.withEmbeddedDerbyAndZookeeper();
-
-//    kafkaServer = new EmbeddedKafkaServer(cluster.getZookeeper(), cluster.getTestFolder(), Map.of());
+//    historical.addProperty("druid.processing.buffer.sizeBytes", "134217728");
+    historical.addProperty("druid.processing.numThreads", "10");
+    historical.addProperty("druid.segmentCache.numLoadingThreads", "10");
+    overlord.addProperty("druid.processing.numThreads", "10");
+//    historical.addProperty("druid.server.maxSize", "3g");
 
     cluster.addExtension(KafkaIndexTaskModule.class)
-//           .addResource(kafkaServer)
            .useLatchableEmitter()
+           .addExtension(S3StorageDruidModule.class)
+           .addServer(new EmbeddedRouter())
            .addServer(coordinator)
            .addServer(overlord)
            .addServer(indexer)
@@ -102,12 +106,12 @@ public class BroadcastJoinQuerySimTest extends IndexingSimulationTestBase
   {
 
     final TestDerbyConnector.DerbyConnectorRule derbyConnectorRule = cluster.getInMemoryDerbyResource().getDbRule();
-    derbyConnectorRule.getConnector().createSegmentTable();
+//    derbyConnectorRule.getConnector().createSegmentTable();
     final TestDerbyConnector.SegmentsTable segments = derbyConnectorRule.segments();
 
 
     // Wikipedia segment
-    String payloadString = "\"{\"dataSource\":\"wikipedia_editstream\",\"interval\":\"2012-12-29T00:00:00.000Z/2013-01-10T08:00:00.000Z\",\"version\":\"2013-01-10T08:13:47.830Z_v9\",\"loadSpec\":{\"type\":\"s3_zip\",\"bucket\":\"static.druid.io\",\"key\":\"data/segments/wikipedia_editstream/2012-12-29T00:00:00.000Z_2013-01-10T08:00:00.000Z/2013-01-10T08:13:47.830Z_v9/0/index.zip\"},\"dimensions\":\"anonymous,area_code,city,continent_code,country_name,dma_code,geo,language,namespace,network,newpage,page,postal_code,region_lookup,robot,unpatrolled,user\",\"metrics\":\"added,count,deleted,delta,delta_hist,unique_users,variation\",\"shardSpec\":{\"type\":\"none\"},\"binaryVersion\":9,\"size\":446027801,\"identifier\":\"wikipedia_editstream_2012-12-29T00:00:00.000Z_2013-01-10T08:00:00.000Z_2013-01-10T08:13:47.830Z_v9\"}\"";
+    String payloadString = "{\"dataSource\":\"wikipedia_editstream\",\"interval\":\"2012-12-29T00:00:00.000Z/2013-01-10T08:00:00.000Z\",\"version\":\"2013-01-10T08:13:47.830Z_v9\",\"loadSpec\":{\"type\":\"s3_zip\",\"bucket\":\"static.druid.io\",\"key\":\"data/segments/wikipedia_editstream/2012-12-29T00:00:00.000Z_2013-01-10T08:00:00.000Z/2013-01-10T08:13:47.830Z_v9/0/index.zip\"},\"dimensions\":\"anonymous,area_code,city,continent_code,country_name,dma_code,geo,language,namespace,network,newpage,page,postal_code,region_lookup,robot,unpatrolled,user\",\"metrics\":\"added,count,deleted,delta,delta_hist,unique_users,variation\",\"shardSpec\":{\"type\":\"none\"},\"binaryVersion\":9,\"size\":446027801,\"identifier\":\"wikipedia_editstream_2012-12-29T00:00:00.000Z_2013-01-10T08:00:00.000Z_2013-01-10T08:13:47.830Z_v9\"}";
     byte[] payloadBytes = payloadString.getBytes(StandardCharsets.UTF_8);
 
     segments.insert(

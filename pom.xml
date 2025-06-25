@@ -1708,7 +1708,7 @@
                                         <!--LGPL licenced library-->
                                         <exclude>com.google.code.findbugs:annotations</exclude>
                                         <!-- shouldn't be loaded alongside with log4j-slf4j2-impl -->
-                                        <exclude>org.apache.logging.log4j:log4j-slf4j-impl</exclude>
+<!--                                        <exclude>org.apache.logging.log4j:log4j-slf4j-impl</exclude>-->
                                         <!-- See https://github.com/apache/druid/pull/17370 -->
                                         <exclude>javax.xml.bind:jaxb-api</exclude>
                                     </excludes>
