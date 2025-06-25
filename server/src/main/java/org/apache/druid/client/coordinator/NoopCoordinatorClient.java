@@ -28,6 +28,7 @@ import org.apache.druid.rpc.ServiceRetryPolicy;
 import org.apache.druid.segment.metadata.DataSourceInformation;
 import org.apache.druid.server.compaction.CompactionStatusResponse;
 import org.apache.druid.server.coordinator.CoordinatorDynamicConfig;
+import org.apache.druid.server.coordinator.rules.Rule;
 import org.apache.druid.timeline.DataSegment;
 import org.joda.time.Interval;
 
@@ -103,6 +104,12 @@ public class NoopCoordinatorClient implements CoordinatorClient
   public ListenableFuture<Map<String, LookupExtractorFactoryContainer>> fetchLookupsForTier(
       String tier
   )
+  {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public ListenableFuture<Boolean> postLoadRules(String dataSource, List<Rule> rules)
   {
     throw new UnsupportedOperationException();
   }
