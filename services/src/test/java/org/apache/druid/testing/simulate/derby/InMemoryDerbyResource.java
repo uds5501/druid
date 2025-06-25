@@ -53,4 +53,9 @@ public class InMemoryDerbyResource implements EmbeddedResource
   {
     dbRule.after();
   }
+
+  public TestDerbyConnector.DerbyConnectorRule getDbRule()
+  {
+    return dbRule;
+  }
 }

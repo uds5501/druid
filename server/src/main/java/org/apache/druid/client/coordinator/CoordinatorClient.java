@@ -28,6 +28,7 @@ import org.apache.druid.rpc.ServiceRetryPolicy;
 import org.apache.druid.segment.metadata.DataSourceInformation;
 import org.apache.druid.server.compaction.CompactionStatusResponse;
 import org.apache.druid.server.coordinator.CoordinatorDynamicConfig;
+import org.apache.druid.server.coordinator.rules.Rule;
 import org.apache.druid.timeline.DataSegment;
 import org.joda.time.Interval;
 
@@ -105,4 +106,6 @@ public interface CoordinatorClient
    * @param tier         The name of the tier for which the lookup configuration is to be fetched.
    */
   ListenableFuture<Map<String, LookupExtractorFactoryContainer>> fetchLookupsForTier(String tier);
+
+  ListenableFuture<Boolean> postLoadRules(String dataSource, List<Rule> rules);
 }

@@ -42,8 +42,10 @@ import org.apache.druid.segment.metadata.DataSourceInformation;
 import org.apache.druid.server.compaction.CompactionStatusResponse;
 import org.apache.druid.server.coordination.LoadableDataSegment;
 import org.apache.druid.server.coordinator.CoordinatorDynamicConfig;
+import org.apache.druid.server.coordinator.rules.Rule;
 import org.apache.druid.timeline.DataSegment;
 import org.jboss.netty.handler.codec.http.HttpMethod;
+import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.joda.time.Interval;
 
 import javax.annotation.Nullable;
@@ -125,7 +127,9 @@ public class CoordinatorClientImpl implements CoordinatorClient
           holder -> JacksonUtils.readValue(
               jsonMapper,
               holder.getContent(),
-              new TypeReference<>() {}
+              new TypeReference<>()
+              {
+              }
           )
       );
       FutureUtils.getUnchecked(segments, true).forEach(retVal::add);
@@ -148,7 +152,11 @@ public class CoordinatorClientImpl implements CoordinatorClient
                 .jsonContent(jsonMapper, intervals),
             new BytesFullResponseHandler()
         ),
-        holder -> JacksonUtils.readValue(jsonMapper, holder.getContent(), new TypeReference<>() {})
+        holder -> JacksonUtils.readValue(
+            jsonMapper, holder.getContent(), new TypeReference<>()
+            {
+            }
+        )
     );
   }
 
@@ -162,7 +170,11 @@ public class CoordinatorClientImpl implements CoordinatorClient
                 .jsonContent(jsonMapper, dataSources),
             new BytesFullResponseHandler()
         ),
-        holder -> JacksonUtils.readValue(jsonMapper, holder.getContent(), new TypeReference<>() {})
+        holder -> JacksonUtils.readValue(
+            jsonMapper, holder.getContent(), new TypeReference<>()
+            {
+            }
+        )
     );
   }
 
@@ -203,7 +215,11 @@ public class CoordinatorClientImpl implements CoordinatorClient
             new RequestBuilder(HttpMethod.GET, path),
             new BytesFullResponseHandler()
         ),
-        holder -> JacksonUtils.readValue(jsonMapper, holder.getContent(), new TypeReference<>() {})
+        holder -> JacksonUtils.readValue(
+            jsonMapper, holder.getContent(), new TypeReference<>()
+            {
+            }
+        )
     );
   }
 
@@ -263,12 +279,34 @@ public class CoordinatorClientImpl implements CoordinatorClient
     );
   }
 
+  @Override
+  public ListenableFuture<Boolean> postLoadRules(String dataSource, List<Rule> rules)
+  {
+    final String path = StringUtils.format(
+        "/druid/coordinator/v1/rules/%s",
+        StringUtils.urlEncode(dataSource)
+    );
+
+    return FutureUtils.transform(
+        client.asyncRequest(
+            new RequestBuilder(HttpMethod.POST, path)
+                .jsonContent(jsonMapper, rules),
+            new BytesFullResponseHandler()
+        ),
+        holder ->
+            holder.getResponse().getStatus().equals(HttpResponseStatus.ACCEPTED) ||
+            holder.getResponse().getStatus().equals(HttpResponseStatus.OK)
+    );
+  }
+
   private Map<String, LookupExtractorFactoryContainer> extractLookupFactory(BytesFullResponseHolder holder)
   {
     Map<String, Object> lookupNameToGenericConfig = JacksonUtils.readValue(
         jsonMapper,
         holder.getContent(),
-        new TypeReference<>() {}
+        new TypeReference<>()
+        {
+        }
     );
     return LookupUtils.tryConvertObjectMapToLookupConfigMap(
         lookupNameToGenericConfig,

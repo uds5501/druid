@@ -119,6 +119,15 @@ public class EmbeddedDruidCluster implements ClusterReferencesProvider, Embedded
     resources.add(zookeeper);
   }
 
+  public InMemoryDerbyResource getInMemoryDerbyResource()
+  {
+    return resources.stream()
+        .filter(InMemoryDerbyResource.class::isInstance)
+        .map(InMemoryDerbyResource.class::cast)
+        .findFirst()
+        .orElseThrow(() -> new ISE("No InMemoryDerbyResource found in the cluster"));
+  }
+
   /**
    * Configures this cluster to use a {@link LatchableEmitter} by setting common
    * runtime property {@code druid.emitter=latching} and adding the extension

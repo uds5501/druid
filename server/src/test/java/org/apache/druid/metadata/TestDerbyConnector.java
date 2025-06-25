@@ -305,6 +305,16 @@ public class TestDerbyConnector extends DerbyConnector
       this.rule = rule;
     }
 
+    public int insert(String sqlFormat, Object... args)
+    {
+      return this.rule.getConnector().retryWithHandle(
+          handle -> handle.insert(
+              StringUtils.format(sqlFormat, getTableName()),
+              args
+          )
+      );
+    }
+
     /**
      * Updates the segments table with the supplied SQL query format and arguments.
      *
