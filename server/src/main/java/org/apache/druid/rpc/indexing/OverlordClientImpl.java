@@ -454,6 +454,29 @@ public class OverlordClientImpl implements OverlordClient
     return new OverlordClientImpl(client.withRetryPolicy(retryPolicy), jsonMapper);
   }
 
+  @Override
+  public ListenableFuture<Void> submitIndexTask(String taskJson) {
+    return FutureUtils.transform(
+        client.asyncRequest(
+            new RequestBuilder(HttpMethod.POST, "/druid/indexer/v1/task")
+                .content("application/json", StringUtils.toUtf8(taskJson)),
+            new BytesFullResponseHandler()
+        ),
+        holder -> {
+          final Map<String, Object> map =
+              JacksonUtils.readValue(jsonMapper, holder.getContent(), JacksonUtils.TYPE_REFERENCE_MAP_STRING_OBJECT);
+          final String taskId = (String) map.get("task");
+
+          Preconditions.checkState(
+              taskId != null,
+              "Task submission did not return a valid task ID. Response: %s",
+              map
+          );
+          return null;
+        }
+    );
+  }
+
   private <T> JsonParserIterator<T> asJsonParserIterator(final InputStream in, final Class<T> clazz)
   {
     return new JsonParserIterator<>(

@@ -288,4 +288,6 @@ public interface OverlordClient
    * Returns a copy of this client with a different retry policy.
    */
   OverlordClient withRetryPolicy(ServiceRetryPolicy retryPolicy);
+
+  ListenableFuture<Void> submitIndexTask(String taskJson);
 }

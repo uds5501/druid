@@ -1,7 +1,10 @@
 package org.apache.druid.indexing.kafka.simulate;
 
 import com.google.common.collect.ImmutableList;
+import org.apache.commons.io.IOUtils;
 import org.apache.druid.indexing.kafka.KafkaIndexTaskModule;
+import org.apache.druid.java.util.common.ISE;
+import org.apache.druid.java.util.common.StringUtils;
 import org.apache.druid.metadata.TestDerbyConnector;
 import org.apache.druid.server.coordinator.rules.ForeverBroadcastDistributionRule;
 import org.apache.druid.testing.simulate.EmbeddedBroker;
@@ -14,6 +17,9 @@ import org.apache.druid.testing.simulate.junit5.IndexingSimulationTestBase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 public class BroadcastJoinQuerySimTest extends IndexingSimulationTestBase
@@ -23,6 +29,7 @@ public class BroadcastJoinQuerySimTest extends IndexingSimulationTestBase
   private static final String BROADCAST_JOIN_METADATA_QUERIES_AFTER_DROP_RESOURCE = "/queries/broadcast_join_after_drop_metadata_queries.json";
   private static final String BROADCAST_JOIN_QUERIES_RESOURCE = "/queries/broadcast_join_queries.json";
   private static final String BROADCAST_JOIN_DATASOURCE = "broadcast_join_wikipedia_test";
+  private static final String WIKIPEDIA_DATA_SOURCE = "wikipedia_editstream";
 
   private final EmbeddedBroker broker = new EmbeddedBroker();
   private final EmbeddedIndexer indexer = new EmbeddedIndexer();
@@ -55,9 +62,12 @@ public class BroadcastJoinQuerySimTest extends IndexingSimulationTestBase
   }
 
   @Test
-  public void test_broadcastJoinQuery_centralizedDatasource()
+  public void test_broadcastJoinQuery_centralizedDatasource() throws IOException
   {
     cluster.leaderCoordinator().postLoadRules(BROADCAST_JOIN_DATASOURCE, ImmutableList.of(new ForeverBroadcastDistributionRule()));
+    String taskJson = replaceJoinTemplate(getResourceAsString(BROADCAST_JOIN_TASK), BROADCAST_JOIN_DATASOURCE);
+    cluster.leaderOverlord().submitIndexTask(taskJson);
+
   }
 
   private void insertSegments()
@@ -132,5 +142,29 @@ public class BroadcastJoinQuerySimTest extends IndexingSimulationTestBase
         24664730L,
         "{\"type\":\"s3_zip\",\"bucket\":\"static.druid.io\",\"key\":\"data/segments/wikipedia/20130801T000000.000Z_20130802T000000.000Z/2013-08-08T21_22_48.989Z/0/index.zip\"}"
     );
+  }
+
+  private static String replaceJoinTemplate(String template, String joinDataSource)
+  {
+    return StringUtils.replace(
+        StringUtils.replace(template, "%%JOIN_DATASOURCE%%", joinDataSource),
+        "%%REGULAR_DATASOURCE%%",
+        WIKIPEDIA_DATA_SOURCE
+    );
+  }
+
+  private static String getResourceAsString(String file) throws IOException
+  {
+    try (final InputStream inputStream = getResourceAsStream(file)) {
+      if (inputStream == null) {
+        throw new ISE("Failed to load resource: [%s]", file);
+      }
+      return IOUtils.toString(inputStream, StandardCharsets.UTF_8);
+    }
+  }
+
+  public static InputStream getResourceAsStream(String resource)
+  {
+    return BroadcastJoinQuerySimTest.class.getResourceAsStream(resource);
   }
 }
