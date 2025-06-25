@@ -143,7 +143,7 @@ public class KafkaSupervisorSimTest extends IndexingSimulationTestBase
     final String topic = dataSource;
     final int partitionCount = 15;
     final int recordsPerPartition = 5;
-    final int taskCountMin = 3;
+    final int taskCountMin = 14;
 
     kafkaServer.createTopicWithPartitions(topic, partitionCount);
 
