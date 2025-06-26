@@ -70,11 +70,19 @@ public class InMemoryDerbyModule extends SQLMetadataStorageDruidModule implement
     super.configure(binder);
 
     final String connectURI = properties.getProperty("druid.metadata.storage.connector.connectURI");
+    final String enableCentralizedSchema = properties.getProperty(
+        "druid.metadata.storage.connector.enableCentralizedDatasourceSchema");
+
+    final CentralizedDatasourceSchemaConfig centralizedDatasourceSchemaConfig =
+        enableCentralizedSchema == null || enableCentralizedSchema.equals("false")
+        ? CentralizedDatasourceSchemaConfig.create()
+        : CentralizedDatasourceSchemaConfig.enabledWithBackfill();
+
     final TestDerbyConnector connector = new TestDerbyConnector(
         MetadataStorageConnectorConfig.create(connectURI, null, null, null),
         MetadataStorageTablesConfig.fromBase(properties.getProperty("druid.metadata.storage.tables.base")),
         connectURI,
-        CentralizedDatasourceSchemaConfig.create()
+        centralizedDatasourceSchemaConfig
     );
 
     PolyBind.optionBinder(binder, Key.get(MetadataStorageProvider.class))

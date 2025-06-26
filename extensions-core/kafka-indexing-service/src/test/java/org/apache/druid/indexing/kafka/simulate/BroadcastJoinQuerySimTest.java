@@ -43,16 +43,18 @@ public class BroadcastJoinQuerySimTest extends IndexingSimulationTestBase
   @Override
   public EmbeddedDruidCluster createCluster()
   {
-    final EmbeddedDruidCluster cluster = EmbeddedDruidCluster.withEmbeddedDerbyAndZookeeper();
-//    historical.addProperty("druid.processing.buffer.sizeBytes", "134217728");
+    final EmbeddedDruidCluster cluster = EmbeddedDruidCluster.withEmbeddedDerbyAndZookeeper(true);
     historical.addProperty("druid.processing.numThreads", "10");
     historical.addProperty("druid.segmentCache.numLoadingThreads", "10");
     overlord.addProperty("druid.processing.numThreads", "10");
-//    historical.addProperty("druid.server.maxSize", "3g");
+    coordinator.addProperty("druid.coordinator.segmentMetadata.metadataRefreshPeriod", "PT15S");
+    coordinator.addProperty("druid.coordinator.segmentMetadata.metadataRefreshPeriod", "PT15S");
+    coordinator.addProperty("druid.manager.segments.useIncrementalCache", "always");
 
     cluster.addExtension(KafkaIndexTaskModule.class)
            .useLatchableEmitter()
-           .addExtension(S3StorageDruidModule.class)
+           .addCommonProperty("druid.centralizedDatasourceSchema.enabled", "true")
+           .addCommonProperty("druid.centralizedDatasourceSchema.backFillEnabled", "true")
            .addServer(new EmbeddedRouter())
            .addServer(coordinator)
            .addServer(overlord)
@@ -106,7 +108,7 @@ public class BroadcastJoinQuerySimTest extends IndexingSimulationTestBase
   {
 
     final TestDerbyConnector.DerbyConnectorRule derbyConnectorRule = cluster.getInMemoryDerbyResource().getDbRule();
-//    derbyConnectorRule.getConnector().createSegmentTable();
+    derbyConnectorRule.getConnector().createSegmentTable();
     final TestDerbyConnector.SegmentsTable segments = derbyConnectorRule.segments();
 
 

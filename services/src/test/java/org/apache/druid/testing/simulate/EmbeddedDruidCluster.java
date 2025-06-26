@@ -103,6 +103,16 @@ public class EmbeddedDruidCluster implements ClusterReferencesProvider, Embedded
     return cluster;
   }
 
+  public static EmbeddedDruidCluster withEmbeddedDerbyAndZookeeper(boolean enableCentralizedDatasourceSchema)
+  {
+    final EmbeddedDruidCluster cluster = new EmbeddedDruidCluster();
+    cluster.resources.add(new InMemoryDerbyResource(cluster, enableCentralizedDatasourceSchema));
+    cluster.extensionModules.add(InMemoryDerbyModule.class);
+    cluster.addEmbeddedZookeeper();
+
+    return cluster;
+  }
+
   /**
    * Creates a new empty {@link EmbeddedDruidCluster} with no preloaded extensions
    * or resources. This method should be used when using non-embedded metadata

@@ -19,9 +19,13 @@
 
 package org.apache.druid.testing.simulate.derby;
 
+import org.apache.druid.metadata.MetadataStorageTablesConfig;
 import org.apache.druid.metadata.TestDerbyConnector;
+import org.apache.druid.segment.metadata.CentralizedDatasourceSchemaConfig;
 import org.apache.druid.testing.simulate.EmbeddedDruidCluster;
 import org.apache.druid.testing.simulate.EmbeddedResource;
+
+import static org.apache.druid.metadata.TestDerbyConnector.dbSafeUUID;
 
 /**
  * Resource to run an embedded Derby metadata store in memory.
@@ -30,11 +34,23 @@ public class InMemoryDerbyResource implements EmbeddedResource
 {
   private final EmbeddedDruidCluster cluster;
   private final TestDerbyConnector.DerbyConnectorRule dbRule;
+  private final boolean enableCentralizedDatasourceSchema;
 
   public InMemoryDerbyResource(EmbeddedDruidCluster cluster)
   {
     this.cluster = cluster;
     this.dbRule = new TestDerbyConnector.DerbyConnectorRule();
+    this.enableCentralizedDatasourceSchema = false;
+  }
+
+  public InMemoryDerbyResource(EmbeddedDruidCluster cluster, boolean enableCentralizedDatasourceSchema)
+  {
+    this.cluster = cluster;
+    this.enableCentralizedDatasourceSchema = true;
+    this.dbRule = enableCentralizedDatasourceSchema ? new TestDerbyConnector.DerbyConnectorRule(
+        MetadataStorageTablesConfig.fromBase("druidTest" + dbSafeUUID()),
+        CentralizedDatasourceSchemaConfig.enabledWithBackfill()
+    ) : new TestDerbyConnector.DerbyConnectorRule();
   }
 
   @Override
@@ -46,6 +62,10 @@ public class InMemoryDerbyResource implements EmbeddedResource
     cluster.addCommonProperty("druid.metadata.storage.type", InMemoryDerbyModule.TYPE);
     cluster.addCommonProperty("druid.metadata.storage.tables.base", connector.getMetadataTablesConfig().getBase());
     cluster.addCommonProperty("druid.metadata.storage.connector.connectURI", connector.getJdbcUri());
+    cluster.addCommonProperty(
+        "druid.metadata.storage.connector.enableCentralizedDatasourceSchema",
+        String.valueOf(this.enableCentralizedDatasourceSchema)
+    );
   }
 
   @Override

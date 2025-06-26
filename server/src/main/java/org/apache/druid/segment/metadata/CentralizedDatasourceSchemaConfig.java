@@ -115,4 +115,9 @@ public class CentralizedDatasourceSchemaConfig
   {
     return new CentralizedDatasourceSchemaConfig(enabled, null, null, null);
   }
+
+  public static CentralizedDatasourceSchemaConfig enabledWithBackfill()
+  {
+    return new CentralizedDatasourceSchemaConfig(true, true, null, null);
+  }
 }
