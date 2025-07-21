@@ -85,13 +85,13 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * TaskRunner implemention for the CliIndexer task execution service, which runs all tasks in a single process.
- *
+ * <p>
  * Two thread pools are used:
  * - A task execution pool, sized to number of worker slots. This is used to setup and execute the Task run() methods.
  * - A control thread pool, sized to number of worker slots. The control threads are responsible for running graceful
- *   shutdown on the Task objects. Only one shutdown per-task can be running at a given time,
- *   so we allocate one control thread per worker slot.
- *
+ * shutdown on the Task objects. Only one shutdown per-task can be running at a given time,
+ * so we allocate one control thread per worker slot.
+ * <p>
  * Note that separate task logs are not currently supported, all task log entries will be written to the Indexer
  * process log instead.
  */
@@ -140,7 +140,7 @@ public class ThreadingTaskRunner
         Execs.multiThreaded(workerConfig.getCapacity(), "threading-task-runner-control-%d")
     );
     this.rolloverExecutor = Executors.newScheduledThreadPool(
-        workerConfig.getCapacity(), 
+        workerConfig.getCapacity(),
         new ThreadFactoryBuilder().setNameFormat("threading-task-runner-rollover-%d").build()
     );
   }
@@ -258,7 +258,12 @@ public class ThreadingTaskRunner
                             LOGGER.info("Logging output of task[%s] to file[%s].", task.getId(), logFile);
                             Appenderators.setTaskThreadContextForIndexers(task.getId(), logFile);
                             // Start log rotation for this task
-                            taskWorkItem.logRotationFuture = startLogRotation(taskWorkItem, storageSlot, toolbox);
+                            taskWorkItem.logRotationFuture = startLogRotation(
+                                taskWorkItem,
+                                storageSlot,
+                                toolbox,
+                                attemptDir
+                            );
                             try {
                               taskStatus = task.run(toolbox);
                             }
@@ -275,12 +280,12 @@ public class ThreadingTaskRunner
                             finally {
                               taskWorkItem.setState(RunnerTaskState.NONE);
                               Thread.currentThread().setName(priorThreadName);
-                              
+
                               // Stop log rotation
                               if (taskWorkItem.logRotationFuture != null) {
                                 taskWorkItem.logRotationFuture.cancel(false);
                               }
-                              
+
                               if (reportsFile.exists()) {
                                 taskLogPusher.pushTaskReports(generatedTaskId, reportsFile);
                               }
@@ -368,7 +373,7 @@ public class ThreadingTaskRunner
   /**
    * Submits a callable to the control thread pool that attempts a task graceful shutdown,
    * if shutdown is not already scheduled.
-   *
+   * <p>
    * The shutdown will wait for the configured timeout and then interrupt the thread if the timeout is exceeded.
    */
   private ListenableFuture scheduleTaskShutdown(ThreadingTaskRunnerWorkItem taskInfo)
@@ -416,7 +421,7 @@ public class ThreadingTaskRunner
 
   /**
    * First shuts down the task execution pool and then schedules a graceful shutdown attempt for each active task.
-   *
+   * <p>
    * After the tasks shutdown gracefully or the graceful shutdown timeout is exceeded, the control thread pool
    * will be terminated (also waiting for the graceful shutdown period for this termination).
    */
@@ -535,7 +540,10 @@ public class ThreadingTaskRunner
   @Override
   public Map<String, Long> getIdleTaskSlotCount()
   {
-    return ImmutableMap.of(workerConfig.getCategory(), Math.max(getTotalTaskSlotCountLong() - getUsedTaskSlotCountLong(), 0));
+    return ImmutableMap.of(
+        workerConfig.getCategory(),
+        Math.max(getTotalTaskSlotCountLong() - getUsedTaskSlotCountLong(), 0)
+    );
   }
 
   @Override
@@ -588,42 +596,60 @@ public class ThreadingTaskRunner
   private ScheduledFuture<?> startLogRotation(
       ThreadingTaskRunnerWorkItem workItem,
       TaskStorageDirTracker.StorageSlot storageSlot,
-      TaskToolbox toolbox
+      TaskToolbox toolbox,
+      File attemptDir
   )
   {
-    return rolloverExecutor.scheduleAtFixedRate(() -> {
-      try {
-        if (!workItem.shutdown && workItem.getState() == RunnerTaskState.RUNNING && workItem.task instanceof SeekableStreamIndexTask) {
-          final Task task = workItem.getTask();
-          int currentSuffix = ((SeekableStreamIndexTask) task).getCurrentSuffix();
-          String currentTaskId = getPsuedoTaskId(task, currentSuffix);
+    return rolloverExecutor.scheduleAtFixedRate(
+        () -> {
+          try {
+            if (!workItem.shutdown
+                && workItem.getState() == RunnerTaskState.RUNNING
+                && workItem.task instanceof SeekableStreamIndexTask) {
+              final Task task = workItem.getTask();
+              int currentSuffix = ((SeekableStreamIndexTask) task).getCurrentSuffix();
+              String currentTaskId = getPsuedoTaskId(task, currentSuffix);
 
-          final Task psuedoTask = generatePsuedoTask(task, currentTaskId);
-          toolbox.getOverlordClient().storeTask(psuedoTask);
+              final Task psuedoTask = generatePsuedoTask(task, currentTaskId);
+              toolbox.getOverlordClient().storeTask(psuedoTask);
 
+              final File taskDir = new File(storageSlot.getDirectory(), currentTaskId);
+              final File taskFile = new File(taskDir, "task.json");
+              final File reportsFile = new File(attemptDir, "report.json");
+              final File logFile = new File(taskDir, "log");
 
-          ((SeekableStreamIndexTask) workItem.task).incrementSuffix();
+              if (reportsFile.exists()) {
+                taskLogPusher.pushTaskReports(currentTaskId, reportsFile);
+              }
+              if (logFile.exists()) {
+                taskLogPusher.pushTaskLog(currentTaskId, logFile);
+              }
 
-          String generatedTaskId = getPsuedoTaskId(task, ((SeekableStreamIndexTask) task).getCurrentSuffix());
-          final File taskDir = new File(storageSlot.getDirectory(), generatedTaskId);
-          File newLogFile = new File(taskDir, "log");
-          File currentLogFile = workItem.currentLogFile.get();
+              ((SeekableStreamIndexTask) workItem.task).incrementSuffix();
 
-          LOGGER.info("Rotating log file for task[%s] from[%s] to[%s]", 
-                      workItem.getTaskId(), currentLogFile.getName(), newLogFile.getName());
-          
-          // Update the current log file reference
-          workItem.currentLogFile.set(newLogFile);
-          workItem.logFile = newLogFile;
-          
-          // Update the appenderator context to use the new log file
-          Appenderators.setTaskThreadContextForIndexers(workItem.getTaskId(), newLogFile);
-        }
-      }
-      catch (Exception e) {
-        LOGGER.warn(e, "Failed to rotate log file for task[%s]", workItem.getTaskId());
-      }
-    }, 3, 2, TimeUnit.SECONDS);
+              String generatedTaskId = getPsuedoTaskId(task, ((SeekableStreamIndexTask) task).getCurrentSuffix());
+              final File newTaskDir = new File(storageSlot.getDirectory(), generatedTaskId);
+              File newLogFile = new File(newTaskDir, "log");
+              File currentLogFile = workItem.currentLogFile.get();
+
+              LOGGER.info(
+                  "Rotating log file for task[%s] from[%s] to[%s]",
+                  workItem.getTaskId(), currentLogFile.getName(), newLogFile.getName()
+              );
+
+              // Update the current log file reference
+              workItem.currentLogFile.set(newLogFile);
+              workItem.logFile = newLogFile;
+
+              // Update the appenderator context to use the new log file
+              Appenderators.setTaskThreadContextForIndexers(workItem.getTaskId(), newLogFile);
+            }
+          }
+          catch (Exception e) {
+            LOGGER.warn(e, "Failed to rotate log file for task[%s]", workItem.getTaskId());
+          }
+        }, 3, 2, TimeUnit.SECONDS
+    );
   }
 
   private String getPsuedoTaskId(Task task, int currentSuffix)
@@ -635,8 +661,16 @@ public class ThreadingTaskRunner
                            ) : "");
   }
 
-  private Task generatePsuedoTask(Task existingTask, String taskId) {
-    return new NoopTask(taskId, existingTask.getGroupId(), existingTask.getDataSource(), 0, 0, existingTask.getContext());
+  private Task generatePsuedoTask(Task existingTask, String taskId)
+  {
+    return new NoopTask(
+        taskId,
+        existingTask.getGroupId(),
+        existingTask.getDataSource(),
+        0,
+        0,
+        existingTask.getContext()
+    );
   }
 
   protected static class ThreadingTaskRunnerWorkItem extends TaskRunnerWorkItem

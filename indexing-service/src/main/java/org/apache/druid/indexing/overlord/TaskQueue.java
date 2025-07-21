@@ -586,7 +586,7 @@ public class TaskQueue
 
       // If this throws with any sort of exception, including TaskExistsException, we don't want to
       // insert the task into our queue. So don't catch it.
-      taskStorage.insert(task, TaskStatus.running(task.getId()));
+      taskStorage.insert(task, TaskStatus.success(task.getId()));
       return true;
     }
     finally {

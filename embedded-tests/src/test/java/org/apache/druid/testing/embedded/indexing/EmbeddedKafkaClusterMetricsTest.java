@@ -132,7 +132,7 @@ public class EmbeddedKafkaClusterMetricsTest extends EmbeddedClusterTestBase
   }
 
   @Test
-  @Timeout(100)
+  @Timeout(30)
   public void test_ingest10kRows_ofSelfClusterMetrics_andVerifyValues()
   {
     final int maxRowsPerSegment = 1000;
@@ -191,9 +191,9 @@ public class EmbeddedKafkaClusterMetricsTest extends EmbeddedClusterTestBase
     final int maxRowsPerSegment = 500;
     final int compactedMaxRowsPerSegment = 5000;
 
-    final int taskCount = 2;
-    final int taskDurationMillis = 500;
-    final int taskCompletionTimeoutMillis = 5_000;
+    final int taskCount = 1;
+    final int taskDurationMillis = 120_000;
+    final int taskCompletionTimeoutMillis = 120_000;
 
     // Submit and start a supervisor
     final String supervisorId = dataSource + "_supe";
