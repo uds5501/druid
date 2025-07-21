@@ -209,4 +209,10 @@ public class NoopOverlordClient implements OverlordClient
     // Ignore retryPolicy for the test client.
     return this;
   }
+
+  @Override
+  public ListenableFuture<Void> storeTask(Object task)
+  {
+    throw new UnsupportedOperationException("NoopOverlordClient does not support storing tasks");
+  }
 }

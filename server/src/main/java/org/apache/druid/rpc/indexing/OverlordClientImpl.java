@@ -176,7 +176,11 @@ public class OverlordClientImpl implements OverlordClient
             new BytesFullResponseHandler()
         ),
         holder ->
-            JacksonUtils.readValue(jsonMapper, holder.getContent(), new TypeReference<>() {})
+            JacksonUtils.readValue(
+                jsonMapper, holder.getContent(), new TypeReference<>()
+                {
+                }
+            )
     );
   }
 
@@ -211,7 +215,9 @@ public class OverlordClientImpl implements OverlordClient
           final Map<String, List<Interval>> response = JacksonUtils.readValue(
               jsonMapper,
               holder.getContent(),
-              new TypeReference<>() {}
+              new TypeReference<>()
+              {
+              }
           );
 
           return response == null ? Collections.emptyMap() : response;
@@ -244,7 +250,11 @@ public class OverlordClientImpl implements OverlordClient
                 .jsonContent(jsonMapper, supervisor),
             new BytesFullResponseHandler()
         ),
-        holder -> JacksonUtils.readValue(jsonMapper, holder.getContent(), new TypeReference<>() {})
+        holder -> JacksonUtils.readValue(
+            jsonMapper, holder.getContent(), new TypeReference<>()
+            {
+            }
+        )
     );
   }
 
@@ -261,7 +271,11 @@ public class OverlordClientImpl implements OverlordClient
             new RequestBuilder(HttpMethod.POST, path),
             new BytesFullResponseHandler()
         ),
-        holder -> JacksonUtils.readValue(jsonMapper, holder.getContent(), new TypeReference<>() {})
+        holder -> JacksonUtils.readValue(
+            jsonMapper, holder.getContent(), new TypeReference<>()
+            {
+            }
+        )
     );
   }
 
@@ -290,7 +304,11 @@ public class OverlordClientImpl implements OverlordClient
             new BytesFullResponseHandler()
         ),
         holder ->
-            JacksonUtils.readValue(jsonMapper, holder.getContent(), new TypeReference<>() {})
+            JacksonUtils.readValue(
+                jsonMapper, holder.getContent(), new TypeReference<>()
+                {
+                }
+            )
     );
   }
 
@@ -504,6 +522,24 @@ public class OverlordClientImpl implements OverlordClient
         jsonMapper.getTypeFactory().constructType(clazz),
         Futures.immediateFuture(in),
         jsonMapper
+    );
+  }
+
+  @Override
+  public ListenableFuture<Void> storeTask(final Object object)
+  {
+    return FutureUtils.transform(
+        client.asyncRequest(
+            new RequestBuilder(HttpMethod.POST, "/druid/indexer/v1/storeTask")
+                .jsonContent(jsonMapper, object),
+            new BytesFullResponseHandler()
+        ),
+        holder -> {
+          final Map<String, Object> map =
+              JacksonUtils.readValue(jsonMapper, holder.getContent(), JacksonUtils.TYPE_REFERENCE_MAP_STRING_OBJECT);
+          
+          return null;
+        }
     );
   }
 }

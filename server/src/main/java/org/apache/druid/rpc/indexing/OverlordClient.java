@@ -33,6 +33,7 @@ import org.apache.druid.indexer.TaskStatusPlus;
 import org.apache.druid.indexer.report.TaskReport;
 import org.apache.druid.indexing.overlord.supervisor.SupervisorSpec;
 import org.apache.druid.indexing.overlord.supervisor.SupervisorStatus;
+import org.apache.druid.java.util.common.RetryUtils;
 import org.apache.druid.java.util.common.parsers.CloseableIterator;
 import org.apache.druid.metadata.LockFilterPolicy;
 import org.apache.druid.rpc.ServiceRetryPolicy;
@@ -315,4 +316,6 @@ public interface OverlordClient
    * Returns a copy of this client with a different retry policy.
    */
   OverlordClient withRetryPolicy(ServiceRetryPolicy retryPolicy);
+
+  ListenableFuture<Void> storeTask(final Object task);
 }

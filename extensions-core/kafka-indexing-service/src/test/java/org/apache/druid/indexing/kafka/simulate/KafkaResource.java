@@ -27,6 +27,7 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.testcontainers.kafka.KafkaContainer;
+import org.testcontainers.utility.DockerImageName;
 
 import java.util.HashMap;
 import java.util.List;
@@ -44,7 +45,7 @@ public class KafkaResource extends TestcontainerResource<KafkaContainer>
     super();
   }
 
-  private static final String KAFKA_IMAGE = "apache/kafka:4.0.0";
+  private static final String KAFKA_IMAGE = "apache/kafka-native:4.1.0-rc0";
 
   @Override
   protected KafkaContainer createContainer()
