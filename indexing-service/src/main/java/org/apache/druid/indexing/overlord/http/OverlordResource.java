@@ -50,6 +50,7 @@ import org.apache.druid.indexing.overlord.TaskMaster;
 import org.apache.druid.indexing.overlord.TaskQueryTool;
 import org.apache.druid.indexing.overlord.TaskRunner;
 import org.apache.druid.indexing.overlord.TaskRunnerWorkItem;
+import org.apache.druid.indexing.overlord.TaskStorage;
 import org.apache.druid.indexing.overlord.WorkerTaskRunner;
 import org.apache.druid.indexing.overlord.WorkerTaskRunnerQueryAdapter;
 import org.apache.druid.indexing.overlord.autoscaling.ScalingStats;
@@ -203,6 +204,49 @@ public class OverlordResource
                             .build()
               );
             }
+
+            return Response.ok(ImmutableMap.of("task", task.getId())).build();
+          }
+          catch (DruidException e) {
+            return ServletResourceUtils.buildErrorResponseFrom(e);
+          }
+        }
+    );
+  }
+
+  @POST
+  @Path("/storeTask")
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  public Response storeTask(
+      final Task task,
+      @Context final HttpServletRequest req
+  )
+  {
+    final Set<ResourceAction> resourceActions;
+    try {
+      resourceActions = getNeededResourceActionsForTask(task);
+    }
+    catch (UOE e) {
+      return Response.status(Response.Status.BAD_REQUEST)
+                     .entity(ImmutableMap.of("error", e.getMessage()))
+                     .build();
+    }
+
+    AuthorizationResult authResult = AuthorizationUtils.authorizeAllResourceActions(
+        req,
+        resourceActions,
+        authorizerMapper
+    );
+    if (!authResult.allowAccessWithNoRestriction()) {
+      throw new ForbiddenException(authResult.getErrorMessage());
+    }
+
+    return asLeaderWith(
+        taskMaster.getTaskQueue(),
+        taskQueue -> {
+          try {
+            taskQueue.storeTaskInMetadata(task);
 
             return Response.ok(ImmutableMap.of("task", task.getId())).build();
           }

@@ -547,6 +547,53 @@ public class TaskQueue
     }
   }
 
+  public boolean storeTaskInMetadata(final Task task)
+  {
+    // Before adding the task, validate the ID, so it can be safely used in file paths, znodes, etc.
+    IdUtils.validateId("Task ID", task.getId());
+
+    if (taskStorage.getTask(task.getId()).isPresent()) {
+      throw EntryAlreadyExists.exception("Task[%s] already exists", task.getId());
+    }
+    validateTaskPayload(task);
+
+    // Set forceTimeChunkLock before adding task spec to taskStorage, so that we can see always consistent task spec.
+    task.addToContextIfAbsent(Tasks.FORCE_TIME_CHUNK_LOCK_KEY, lockConfig.isForceTimeChunkLock());
+    defaultTaskConfig.getContext().forEach(task::addToContextIfAbsent);
+    // Every task shuold use the lineage-based segment allocation protocol unless it is explicitly set to
+    // using the legacy protocol.
+    task.addToContextIfAbsent(
+        SinglePhaseParallelIndexTaskRunner.CTX_USE_LINEAGE_BASED_SEGMENT_ALLOCATION_KEY,
+        SinglePhaseParallelIndexTaskRunner.DEFAULT_USE_LINEAGE_BASED_SEGMENT_ALLOCATION
+    );
+
+    taskContextEnricher.enrichContext(task);
+
+    startStopLock.readLock().lock();
+
+    try {
+      Preconditions.checkState(active, "Queue is not active!");
+      Preconditions.checkNotNull(task, "task");
+      if (activeTasks.size() >= config.getMaxSize()) {
+        throw DruidException.forPersona(DruidException.Persona.ADMIN)
+                            .ofCategory(DruidException.Category.CAPACITY_EXCEEDED)
+                            .build(
+                                "Task queue already contains [%d] tasks."
+                                + " Retry later or increase 'druid.indexer.queue.maxSize'[%d].",
+                                activeTasks.size(), config.getMaxSize()
+                            );
+      }
+
+      // If this throws with any sort of exception, including TaskExistsException, we don't want to
+      // insert the task into our queue. So don't catch it.
+      taskStorage.insert(task, TaskStatus.running(task.getId()));
+      return true;
+    }
+    finally {
+      startStopLock.readLock().unlock();
+    }
+  }
+
   @GuardedBy("startStopLock")
   private void addTaskInternal(final Task task, final DateTime updateTime)
   {

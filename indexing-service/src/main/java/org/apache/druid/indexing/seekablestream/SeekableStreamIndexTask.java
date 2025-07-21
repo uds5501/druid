@@ -70,6 +70,7 @@ public abstract class SeekableStreamIndexTask<PartitionIdType, SequenceOffsetTyp
   protected final LockGranularity lockGranularityToUse;
   protected final TaskLockType lockTypeToUse;
   protected final String supervisorId;
+  protected int currentSuffix;
 
   // Lazily initialized, to avoid calling it on the overlord when tasks are instantiated.
   // See https://github.com/apache/druid/issues/7724 for issues that can cause.
@@ -104,7 +105,11 @@ public abstract class SeekableStreamIndexTask<PartitionIdType, SequenceOffsetTyp
                                 ? LockGranularity.TIME_CHUNK
                                 : LockGranularity.SEGMENT;
     this.lockTypeToUse = TaskLocks.determineLockTypeForAppend(getContext());
-    this.supervisorId = Preconditions.checkNotNull(Configs.valueOrDefault(supervisorId, dataSchema.getDataSource()), "supervisorId");
+    this.supervisorId = Preconditions.checkNotNull(
+        Configs.valueOrDefault(supervisorId, dataSchema.getDataSource()),
+        "supervisorId"
+    );
+    this.currentSuffix = 0;
   }
 
   protected static String getFormattedGroupId(String supervisorId, String type)
@@ -284,7 +289,7 @@ public abstract class SeekableStreamIndexTask<PartitionIdType, SequenceOffsetTyp
 
   /**
    * Subclasses must override this method to provide the {@link RecordSupplier} that connects with the stream.
-   *
+   * <p>
    * The default implementation delegates to {@link #newTaskRecordSupplier()}, which is deprecated, in order to support
    * existing extensions that have implemented that older method instead of this newer one. New extensions should
    * override this method, not {@link #newTaskRecordSupplier()}.
@@ -304,5 +309,15 @@ public abstract class SeekableStreamIndexTask<PartitionIdType, SequenceOffsetTyp
   public SeekableStreamIndexTaskRunner<PartitionIdType, SequenceOffsetType, ?> getRunner()
   {
     return runnerSupplier.get();
+  }
+
+  public void incrementSuffix()
+  {
+    currentSuffix++;
+  }
+
+  public int getCurrentSuffix()
+  {
+    return currentSuffix;
   }
 }

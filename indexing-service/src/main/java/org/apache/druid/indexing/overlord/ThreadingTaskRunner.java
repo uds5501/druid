@@ -42,6 +42,7 @@ import org.apache.druid.indexing.common.config.TaskConfig;
 import org.apache.druid.indexing.common.task.Task;
 import org.apache.druid.indexing.common.tasklogs.LogUtils;
 import org.apache.druid.indexing.overlord.autoscaling.ScalingStats;
+import org.apache.druid.indexing.seekablestream.SeekableStreamIndexTask;
 import org.apache.druid.indexing.worker.config.WorkerConfig;
 import org.apache.druid.java.util.common.DateTimes;
 import org.apache.druid.java.util.common.FileUtils;
@@ -100,6 +101,7 @@ public class ThreadingTaskRunner
   private final MultipleFileTaskReportFileWriter taskReportFileWriter;
   private final ListeningExecutorService taskExecutor;
   private final ListeningExecutorService controlThreadExecutor;
+  private final ListeningExecutorService rolloverExecutor;
   private final WorkerConfig workerConfig;
 
   private volatile boolean stopping = false;
@@ -129,6 +131,9 @@ public class ThreadingTaskRunner
     );
     this.controlThreadExecutor = MoreExecutors.listeningDecorator(
         Execs.multiThreaded(workerConfig.getCapacity(), "threading-task-runner-control-%d")
+    );
+    this.rolloverExecutor = MoreExecutors.listeningDecorator(
+        Execs.multiThreaded(workerConfig.getCapacity(), "threading-task-runner-rollover-%d")
     );
   }
 
@@ -173,7 +178,14 @@ public class ThreadingTaskRunner
                             );
 
                           }
-                          final File taskDir = new File(storageSlot.getDirectory(), task.getId());
+
+                          String generatedTaskId = task.getId() + (task instanceof SeekableStreamIndexTask ?
+                                                          StringUtils.format(
+                                                              "-%s",
+                                                              ((SeekableStreamIndexTask) task).getCurrentSuffix()
+                                                          ) : "");
+                          final File taskDir = new File(storageSlot.getDirectory(), generatedTaskId);
+
 
                           final String attemptUUID = UUID.randomUUID().toString();
                           final File attemptDir = new File(taskDir, attemptUUID);
@@ -192,7 +204,7 @@ public class ThreadingTaskRunner
                             final File taskFile = new File(taskDir, "task.json");
                             final File reportsFile = new File(attemptDir, "report.json");
                             final File logFile = new File(taskDir, "log");
-                            taskReportFileWriter.add(task.getId(), reportsFile);
+                            taskReportFileWriter.add(generatedTaskId, reportsFile);
 
                             // time to adjust process holders
                             synchronized (tasks) {
@@ -253,10 +265,10 @@ public class ThreadingTaskRunner
                               taskWorkItem.setState(RunnerTaskState.NONE);
                               Thread.currentThread().setName(priorThreadName);
                               if (reportsFile.exists()) {
-                                taskLogPusher.pushTaskReports(task.getId(), reportsFile);
+                                taskLogPusher.pushTaskReports(generatedTaskId, reportsFile);
                               }
                               if (logFile.exists()) {
-                                taskLogPusher.pushTaskLog(task.getId(), logFile);
+                                taskLogPusher.pushTaskLog(generatedTaskId, logFile);
                               }
                               Appenderators.clearTaskThreadContextForIndexers();
                             }
@@ -270,7 +282,7 @@ public class ThreadingTaskRunner
                           }
                           finally {
                             try {
-                              taskReportFileWriter.delete(task.getId());
+                              taskReportFileWriter.delete(generatedTaskId);
                               appenderatorsManager.removeAppenderatorsForTask(task.getId(), task.getDataSource());
 
                               synchronized (tasks) {
