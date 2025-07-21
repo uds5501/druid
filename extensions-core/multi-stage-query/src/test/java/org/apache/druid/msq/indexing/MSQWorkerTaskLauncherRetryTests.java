@@ -279,6 +279,26 @@ public class MSQWorkerTaskLauncherRetryTests
     }
 
     @Override
+    public ListenableFuture<String> runKillTask(
+        String idPrefix,
+        String dataSource,
+        Interval interval,
+        @org.jetbrains.annotations.Nullable List<String> versions,
+        @org.jetbrains.annotations.Nullable Integer maxSegmentsToKill,
+        @org.jetbrains.annotations.Nullable DateTime maxUsedStatusLastUpdatedTime
+    )
+    {
+      return OverlordClient.super.runKillTask(
+          idPrefix,
+          dataSource,
+          interval,
+          versions,
+          maxSegmentsToKill,
+          maxUsedStatusLastUpdatedTime
+      );
+    }
+
+    @Override
     public ListenableFuture<Void> cancelTask(String taskId)
     {
       if (failedWorkers.contains(MSQTasks.workerFromTaskId(taskId))) {
@@ -447,6 +467,13 @@ public class MSQWorkerTaskLauncherRetryTests
     {
       return this;
     }
+
+    @Override
+    public ListenableFuture<Void> storeTask(Object task)
+    {
+      throw new UOE("Not implemented");
+    }
+
 
     public void addUnknownLocationWorker(int workerNumber)
     {

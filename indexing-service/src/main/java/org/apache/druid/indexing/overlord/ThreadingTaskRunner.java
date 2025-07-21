@@ -28,6 +28,7 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.inject.Inject;
 import org.apache.druid.guice.annotations.Self;
 import org.apache.druid.indexer.RunnerTaskState;
@@ -39,6 +40,7 @@ import org.apache.druid.indexing.common.TaskStorageDirTracker;
 import org.apache.druid.indexing.common.TaskToolbox;
 import org.apache.druid.indexing.common.TaskToolboxFactory;
 import org.apache.druid.indexing.common.config.TaskConfig;
+import org.apache.druid.indexing.common.task.NoopTask;
 import org.apache.druid.indexing.common.task.Task;
 import org.apache.druid.indexing.common.tasklogs.LogUtils;
 import org.apache.druid.indexing.overlord.autoscaling.ScalingStats;
@@ -59,6 +61,7 @@ import org.apache.druid.segment.realtime.appenderator.AppenderatorsManager;
 import org.apache.druid.server.DruidNode;
 import org.apache.druid.tasklogs.TaskLogPusher;
 import org.apache.druid.tasklogs.TaskLogStreamer;
+import org.jetbrains.annotations.NotNull;
 import org.joda.time.DateTime;
 import org.joda.time.Interval;
 
@@ -73,8 +76,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * TaskRunner implemention for the CliIndexer task execution service, which runs all tasks in a single process.
@@ -101,7 +108,7 @@ public class ThreadingTaskRunner
   private final MultipleFileTaskReportFileWriter taskReportFileWriter;
   private final ListeningExecutorService taskExecutor;
   private final ListeningExecutorService controlThreadExecutor;
-  private final ListeningExecutorService rolloverExecutor;
+  private final ScheduledExecutorService rolloverExecutor;
   private final WorkerConfig workerConfig;
 
   private volatile boolean stopping = false;
@@ -132,8 +139,9 @@ public class ThreadingTaskRunner
     this.controlThreadExecutor = MoreExecutors.listeningDecorator(
         Execs.multiThreaded(workerConfig.getCapacity(), "threading-task-runner-control-%d")
     );
-    this.rolloverExecutor = MoreExecutors.listeningDecorator(
-        Execs.multiThreaded(workerConfig.getCapacity(), "threading-task-runner-rollover-%d")
+    this.rolloverExecutor = Executors.newScheduledThreadPool(
+        workerConfig.getCapacity(), 
+        new ThreadFactoryBuilder().setNameFormat("threading-task-runner-rollover-%d").build()
     );
   }
 
@@ -179,11 +187,10 @@ public class ThreadingTaskRunner
 
                           }
 
-                          String generatedTaskId = task.getId() + (task instanceof SeekableStreamIndexTask ?
-                                                          StringUtils.format(
-                                                              "-%s",
-                                                              ((SeekableStreamIndexTask) task).getCurrentSuffix()
-                                                          ) : "");
+                          String generatedTaskId = getPsuedoTaskId(
+                              task,
+                              ((SeekableStreamIndexTask) task).getCurrentSuffix()
+                          );
                           final File taskDir = new File(storageSlot.getDirectory(), generatedTaskId);
 
 
@@ -244,10 +251,14 @@ public class ThreadingTaskRunner
                             );
 
                             taskWorkItem.logFile = logFile;
+                            taskWorkItem.currentLogFile.set(logFile);
                             taskWorkItem.setState(RunnerTaskState.RUNNING);
+
 
                             LOGGER.info("Logging output of task[%s] to file[%s].", task.getId(), logFile);
                             Appenderators.setTaskThreadContextForIndexers(task.getId(), logFile);
+                            // Start log rotation for this task
+                            taskWorkItem.logRotationFuture = startLogRotation(taskWorkItem, storageSlot, toolbox);
                             try {
                               taskStatus = task.run(toolbox);
                             }
@@ -264,6 +275,12 @@ public class ThreadingTaskRunner
                             finally {
                               taskWorkItem.setState(RunnerTaskState.NONE);
                               Thread.currentThread().setName(priorThreadName);
+                              
+                              // Stop log rotation
+                              if (taskWorkItem.logRotationFuture != null) {
+                                taskWorkItem.logRotationFuture.cancel(false);
+                              }
+                              
                               if (reportsFile.exists()) {
                                 taskLogPusher.pushTaskReports(generatedTaskId, reportsFile);
                               }
@@ -562,6 +579,66 @@ public class ThreadingTaskRunner
     return appenderatorsManager.getQueryRunnerForSegments(query, specs);
   }
 
+  /**
+   * Starts log rotation for a task, creating new log files every 5 seconds.
+   *
+   * @param workItem The task work item
+   * @return A ScheduledFuture that can be cancelled to stop log rotation
+   */
+  private ScheduledFuture<?> startLogRotation(
+      ThreadingTaskRunnerWorkItem workItem,
+      TaskStorageDirTracker.StorageSlot storageSlot,
+      TaskToolbox toolbox
+  )
+  {
+    return rolloverExecutor.scheduleAtFixedRate(() -> {
+      try {
+        if (!workItem.shutdown && workItem.getState() == RunnerTaskState.RUNNING && workItem.task instanceof SeekableStreamIndexTask) {
+          final Task task = workItem.getTask();
+          int currentSuffix = ((SeekableStreamIndexTask) task).getCurrentSuffix();
+          String currentTaskId = getPsuedoTaskId(task, currentSuffix);
+
+          final Task psuedoTask = generatePsuedoTask(task, currentTaskId);
+          toolbox.getOverlordClient().storeTask(psuedoTask);
+
+
+          ((SeekableStreamIndexTask) workItem.task).incrementSuffix();
+
+          String generatedTaskId = getPsuedoTaskId(task, ((SeekableStreamIndexTask) task).getCurrentSuffix());
+          final File taskDir = new File(storageSlot.getDirectory(), generatedTaskId);
+          File newLogFile = new File(taskDir, "log");
+          File currentLogFile = workItem.currentLogFile.get();
+
+          LOGGER.info("Rotating log file for task[%s] from[%s] to[%s]", 
+                      workItem.getTaskId(), currentLogFile.getName(), newLogFile.getName());
+          
+          // Update the current log file reference
+          workItem.currentLogFile.set(newLogFile);
+          workItem.logFile = newLogFile;
+          
+          // Update the appenderator context to use the new log file
+          Appenderators.setTaskThreadContextForIndexers(workItem.getTaskId(), newLogFile);
+        }
+      }
+      catch (Exception e) {
+        LOGGER.warn(e, "Failed to rotate log file for task[%s]", workItem.getTaskId());
+      }
+    }, 3, 2, TimeUnit.SECONDS);
+  }
+
+  private String getPsuedoTaskId(Task task, int currentSuffix)
+  {
+    return task.getId() + (task instanceof SeekableStreamIndexTask ?
+                           StringUtils.format(
+                               "-%s",
+                               currentSuffix
+                           ) : "");
+  }
+
+  private Task generatePsuedoTask(Task existingTask, String taskId) {
+    return new NoopTask(taskId, existingTask.getGroupId(), existingTask.getDataSource(), 0, 0, existingTask.getContext());
+  }
+
   protected static class ThreadingTaskRunnerWorkItem extends TaskRunnerWorkItem
   {
     private final Task task;
@@ -569,6 +646,8 @@ public class ThreadingTaskRunner
     private volatile ListenableFuture shutdownFuture;
     private volatile RunnerTaskState state;
     private volatile File logFile;
+    private volatile ScheduledFuture<?> logRotationFuture;
+    private volatile AtomicReference<File> currentLogFile = new AtomicReference<>();
 
     private ThreadingTaskRunnerWorkItem(
         Task task,

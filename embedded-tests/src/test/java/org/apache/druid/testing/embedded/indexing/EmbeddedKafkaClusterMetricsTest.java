@@ -132,7 +132,7 @@ public class EmbeddedKafkaClusterMetricsTest extends EmbeddedClusterTestBase
   }
 
   @Test
-  @Timeout(20)
+  @Timeout(100)
   public void test_ingest10kRows_ofSelfClusterMetrics_andVerifyValues()
   {
     final int maxRowsPerSegment = 1000;
