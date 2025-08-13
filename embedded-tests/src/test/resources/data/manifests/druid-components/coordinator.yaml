@@ -1,0 +1,139 @@
+apiVersion: "druid.apache.org/v1alpha1"
+kind: "Druid"
+metadata:
+  name: druid-cluster
+spec:
+  image: apache/druid:34.0.0
+  startScript: /druid.sh
+  scalePvcSts: true
+  rollingDeploy: true
+  defaultProbes: false
+  podLabels:
+    environment: stage
+    release: alpha
+  podAnnotations:
+    dummy: k8s_extn_needs_atleast_one_annotation
+#  additionalContainer:
+#    - containerName: mysqlconnector
+#      runAsInit: true
+#      image: apache/druid:34.0.0
+#      command:
+#        - "sh"
+#        - "-c"
+#        - "wget -O /tmp/mysql-connector-j-8.0.32.tar.gz https://downloads.mysql.com/archives/get/p/3/file/mysql-connector-j-8.0.32.tar.gz && cd /tmp && tar -xf /tmp/mysql-connector-j-8.0.32.tar.gz && cp /tmp/mysql-connector-j-8.0.32/mysql-connector-j-8.0.32.jar /opt/druid/extensions/mysql-connector/mysql-connector-java.jar"
+#      volumeMounts:
+#        - name: mysqlconnector
+#          mountPath: "/opt/druid/extensions/mysql-connector"
+  volumes:
+    - name: mysqlconnector
+      emptyDir: {}
+  volumeMounts:
+    - name: mysqlconnector
+      mountPath: "/opt/druid/extensions/mysql-connector"
+  securityContext:
+    fsGroup: 0
+    runAsUser: 0
+    runAsGroup: 0
+  containerSecurityContext:
+    privileged: true
+  services:
+    - spec:
+        type: ClusterIP
+        clusterIP: None
+  commonConfigMountPath: "/opt/druid/conf/druid/cluster/_common"
+  jvm.options: |-
+    -server
+    -Djava.net.preferIPv4Stack=true
+    -XX:MaxDirectMemorySize=10240g
+    -Duser.timezone=UTC
+    -Dfile.encoding=UTF-8
+    -Dlog4j.debug
+    -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager
+    -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
+  log4j.config: |-
+    <?xml version="1.0" encoding="UTF-8" ?>
+    <Configuration status="TRACE">
+        <Appenders>
+            <Console name="Console" target="SYSTEM_OUT">
+                <JsonLayout properties="true"/>
+            </Console>
+        </Appenders>
+        <Loggers>
+            <Root level="info">
+                <AppenderRef ref="Console"/>
+            </Root>
+        </Loggers>
+    </Configuration>
+  common.runtime.properties: |
+    #
+    # Zookeeper-less Druid Cluster
+    #
+    druid.zk.service.enabled=false
+    druid.discovery.type=k8s
+    druid.discovery.k8s.clusterIdentifier=druid-it
+    druid.serverview.type=http
+    druid.coordinator.loadqueuepeon.type=http
+    druid.indexer.runner.type=httpRemote
+    # Metadata Store
+    druid.metadata.storage.type=derby
+    druid.metadata.storage.connector.connectURI=jdbc:derby://localhost:1527/var/druid/metadata.db;create=true
+    druid.metadata.storage.connector.host=localhost
+    druid.metadata.storage.connector.port=1527
+    druid.metadata.storage.connector.createTables=true
+    # Deep Storage
+    druid.storage.type=local
+    druid.storage.storageDirectory=/opt/druid/var/druid/segments
+    #
+    # Extensions
+    #
+    druid.extensions.loadList=["druid-kubernetes-overlord-extensions", "druid-avro-extensions", "druid-hdfs-storage", "druid-kafka-indexing-service", "druid-datasketches", "druid-kubernetes-extensions"]
+    #
+    # Service discovery
+    #
+    druid.selectors.indexing.serviceName=druid/overlord
+    druid.selectors.coordinator.serviceName=druid/coordinator
+    druid.indexer.logs.type=file
+    druid.indexer.logs.directory=/opt/druid/var/druid/indexing-logs
+    druid.lookup.enableLookupSyncOnStartup=false
+  env:
+    - name: POD_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
+    - name: POD_NAMESPACE
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.namespace
+
+  nodes:
+    coordinator:
+      nodeType: "coordinator"
+      druid.port: 8088
+      services:
+        - spec:
+            type: ClusterIP
+            clusterIP: None
+            ports:
+              - port: 8088
+                name: http
+              - port: 5005
+                name: debug
+      nodeConfigMountPath: "/opt/druid/conf/druid/cluster/master/coordinator-overlord"
+      replicas: 1
+      runtime.properties: |
+        druid.service=druid/coordinator
+        # HTTP server threads
+        druid.coordinator.startDelay=PT30S
+        druid.coordinator.period=PT30S
+        # Configure this coordinator to also run as Overlord
+        druid.coordinator.asOverlord.enabled=true
+        druid.coordinator.asOverlord.overlordService=druid/overlord
+        druid.indexer.queue.startDelay=PT30S
+        druid.indexer.runner.capacity: 2
+        druid.indexer.runner.namespace: druid
+        druid.indexer.runner.type: k8s
+        druid.indexer.task.encapsulatedTask: true
+        druid.host=druid-coordinator
+      extra.jvm.options: |-
+        -Xmx800m
+        -Xms800m

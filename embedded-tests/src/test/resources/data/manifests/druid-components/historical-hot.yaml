@@ -1,0 +1,155 @@
+apiVersion: "druid.apache.org/v1alpha1"
+kind: "Druid"
+metadata:
+  name: druid-cluster
+spec:
+  image: apache/druid:34.0.0
+  startScript: /druid.sh
+  scalePvcSts: true
+  rollingDeploy: true
+  defaultProbes: false
+  podLabels:
+    environment: stage
+    release: alpha
+  podAnnotations:
+    dummy: k8s_extn_needs_atleast_one_annotation
+  volumes:
+    - name: mysqlconnector
+      emptyDir: {}
+  volumeMounts:
+    - name: mysqlconnector
+      mountPath: "/opt/druid/extensions/mysql-connector"
+  securityContext:
+    fsGroup: 0
+    runAsUser: 0
+    runAsGroup: 0
+  containerSecurityContext:
+    privileged: true
+  services:
+    - spec:
+        type: ClusterIP
+        clusterIP: None
+  commonConfigMountPath: "/opt/druid/conf/druid/cluster/_common"
+  jvm.options: |-
+    -server
+    -Djava.net.preferIPv4Stack=true
+    -XX:MaxDirectMemorySize=10240g
+    -Duser.timezone=UTC
+    -Dfile.encoding=UTF-8
+    -Dlog4j.debug
+    -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager
+  log4j.config: |-
+    <?xml version="1.0" encoding="UTF-8" ?>
+    <Configuration status="TRACE">
+        <Appenders>
+            <Console name="Console" target="SYSTEM_OUT">
+                <JsonLayout properties="true"/>
+            </Console>
+        </Appenders>
+        <Loggers>
+            <Root level="info">
+                <AppenderRef ref="Console"/>
+            </Root>
+        </Loggers>
+    </Configuration>
+  common.runtime.properties: |
+    #
+    # Zookeeper-less Druid Cluster
+    #
+    druid.zk.service.enabled=false
+    druid.discovery.type=k8s
+    druid.discovery.k8s.clusterIdentifier=druid-it
+    druid.serverview.type=http
+    druid.coordinator.loadqueuepeon.type=http
+    druid.indexer.runner.type=httpRemote
+    # Metadata Store
+    druid.metadata.storage.type=derby
+    druid.metadata.storage.connector.connectURI=jdbc:derby://localhost:1527/var/druid/metadata.db;create=true
+    druid.metadata.storage.connector.host=localhost
+    druid.metadata.storage.connector.port=1527
+    druid.metadata.storage.connector.createTables=true
+    # Deep Storage
+    druid.storage.type=local
+    druid.storage.storageDirectory=/opt/druid/var/druid/segments
+    #
+    # Extensions
+    #
+    druid.extensions.loadList=["druid-kubernetes-overlord-extensions", "druid-avro-extensions", "druid-hdfs-storage", "druid-kafka-indexing-service", "druid-datasketches", "druid-kubernetes-extensions"]
+    #
+    # Service discovery
+    #
+    druid.selectors.indexing.serviceName=druid/overlord
+    druid.selectors.coordinator.serviceName=druid/coordinator
+    druid.indexer.logs.type=file
+    druid.indexer.logs.directory=/opt/druid/var/druid/indexing-logs
+    druid.lookup.enableLookupSyncOnStartup=false
+  env:
+    - name: POD_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
+    - name: POD_NAMESPACE
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.namespace
+
+  nodes:
+    hot:
+      nodeType: "historical"
+      druid.port: 8088
+      resources:
+        requests:
+          memory: "1.5Mi"
+          cpu: "1"
+      services:
+        - spec:
+            type: ClusterIP
+            clusterIP: None
+      nodeConfigMountPath: "/opt/druid/conf/druid/cluster/data/historical"
+      replicas: 1
+      livenessProbe:
+        failureThreshold: 10
+        httpGet:
+          path: /status/health
+          port: 8088
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        successThreshold: 1
+        timeoutSeconds: 5
+      readinessProbe:
+        failureThreshold: 20
+        httpGet:
+          path: /druid/historical/v1/loadstatus
+          port: 8088
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        successThreshold: 1
+        timeoutSeconds: 5
+      startUpProbe:
+        failureThreshold: 20
+        httpGet:
+          path: /druid/historical/v1/loadstatus
+          port: 8088
+        initialDelaySeconds: 60
+        periodSeconds: 30
+        successThreshold: 1
+        timeoutSeconds: 10
+      volumes:
+        - name: hot-volume
+          emptyDir: {}
+      volumeMounts:
+        - mountPath: /druid/data/segments
+          name: hot-volume
+      runtime.properties: |
+        druid.service=druid/hot
+        druid.server.tier=hot
+        druid.server.priority=1
+        druid.processing.buffer.sizeBytes=25000000
+        druid.processing.numThreads=2
+        # Segment storage
+        druid.segmentCache.locations=[{"path":"/druid/data/segments","maxSize":1000000000}]
+        druid.server.maxSize=1000000000
+        druid.host=druid-historical
+      extra.jvm.options: |-
+        -Xmx512m
+        -Xms512m

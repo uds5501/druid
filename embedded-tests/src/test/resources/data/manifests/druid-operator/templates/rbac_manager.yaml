@@ -1,0 +1,251 @@
+---
+# Source: druid-operator/templates/rbac_manager.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  name: druid-operator-test-manager-role
+rules:
+- apiGroups:
+    - storage.k8s.io
+  resources:
+    - storageclasses
+  verbs:
+    - get
+    - list
+    - watch
+# Split WATCH_NAMESPACE by commas and loop on them
+---
+# Source: druid-operator/templates/rbac_manager.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    helm.sh/chart: druid-operator-0.3.9
+    app.kubernetes.io/name: druid-operator
+    app.kubernetes.io/instance: druid-operator-test
+    app.kubernetes.io/version: "v1.3.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: druid-operator
+    app.kubernetes.io/part-of: druid-operator
+  name: druid-operator-test-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: druid-operator-test-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: druid-operator-test
+    namespace: druid-operator-system
+---
+# Source: druid-operator/templates/rbac_manager.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: druid
+  name: druid-operator-test
+  labels:
+    helm.sh/chart: druid-operator-0.3.9
+    app.kubernetes.io/name: druid-operator
+    app.kubernetes.io/instance: druid-operator-test
+    app.kubernetes.io/version: "v1.3.0"
+    app.kubernetes.io/managed-by: Helm
+rules:
+- apiGroups:
+    - ""
+  resources:
+    - configmaps
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - ""
+  resources:
+    - events
+  verbs:
+    - create
+    - get
+    - list
+    - patch
+    - watch
+- apiGroups:
+    - ""
+  resources:
+    - persistentvolumeclaims
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - ""
+  resources:
+    - pods
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - ""
+  resources:
+    - services
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - apps
+  resources:
+    - deployments
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - apps
+  resources:
+    - statefulsets
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - autoscaling
+  resources:
+    - horizontalpodautoscalers
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - druid.apache.org
+  resources:
+    - druids
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - druid.apache.org
+  resources:
+    - druids/status
+  verbs:
+    - get
+    - patch
+    - update
+- apiGroups:
+    - druid.apache.org
+  resources:
+    - druidingestions
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - druid.apache.org
+  resources:
+    - druidingestions/status
+  verbs:
+    - get
+    - patch
+    - update
+- apiGroups:
+    - networking.k8s.io
+  resources:
+    - ingresses
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - policy
+  resources:
+    - poddisruptionbudgets
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - storage.k8s.io
+  resources:
+    - storageclasses
+  verbs:
+    - get
+    - list
+    - watch
+- apiGroups:
+    - ""
+  resources:
+    - secrets
+  verbs:
+    - get
+    - list
+---
+# Source: druid-operator/templates/rbac_manager.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  namespace: druid
+  name: druid-operator-test
+  labels:
+    helm.sh/chart: druid-operator-0.3.9
+    app.kubernetes.io/name: druid-operator
+    app.kubernetes.io/instance: druid-operator-test
+    app.kubernetes.io/version: "v1.3.0"
+    app.kubernetes.io/managed-by: Helm
+subjects:
+  - kind: ServiceAccount
+    name: druid-operator-test
+    namespace: druid-operator-system
+roleRef:
+  kind: Role
+  name: druid-operator-test
+  apiGroup: rbac.authorization.k8s.io
+---
+# Source: druid-operator/templates/rbac_manager.yaml
+# Split WATCH_NAMESPACE by commas and loop on them
