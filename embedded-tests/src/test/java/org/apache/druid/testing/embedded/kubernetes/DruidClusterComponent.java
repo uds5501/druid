@@ -20,10 +20,17 @@
 package org.apache.druid.testing.embedded.kubernetes;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
+import org.apache.druid.indexing.common.task.Task;
 import org.apache.druid.java.util.common.logger.Logger;
+import org.apache.druid.segment.TestHelper;
 import org.apache.druid.testing.embedded.indexing.Resources;
 
 import java.io.FileInputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -165,6 +172,116 @@ public class DruidClusterComponent implements K8sComponent
   public Optional<String> getRouterUrl()
   {
     return getRouter().map(DruidK8sComponent::getServiceUrl);
+  }
+
+  /**
+   * Submits a task to the Druid cluster and waits for it to complete successfully.
+   */
+  public boolean submitTaskAndWait(Task task, int timeoutSeconds) throws Exception
+  {
+    String taskId = submitTask(task);
+    return waitForTaskToComplete(taskId, timeoutSeconds);
+  }
+
+  /**
+   * Submits a task to the Druid cluster.
+   * 
+   * @param task the task to submit
+   * @return the task ID
+   * @throws Exception if task submission fails
+   */
+  public String submitTask(Task task) throws Exception
+  {
+    Optional<String> coordinatorUrl = getCoordinatorUrl();
+    if (!coordinatorUrl.isPresent()) {
+      throw new IllegalStateException("Coordinator URL not available");
+    }
+
+    String taskJson = TestHelper.JSON_MAPPER.writeValueAsString(task);
+    
+    HttpClient httpClient = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(30))
+        .build();
+
+    String taskSubmissionUrl = coordinatorUrl.get() + "/druid/indexer/v1/task";
+    
+    HttpRequest request = HttpRequest.newBuilder()
+        .uri(URI.create(taskSubmissionUrl))
+        .header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString(taskJson))
+        .timeout(Duration.ofSeconds(60))
+        .build();
+
+    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    
+    if (response.statusCode() != 200) {
+      throw new RuntimeException("Task submission failed. Status: " + response.statusCode() 
+          + ", Response: " + response.body());
+    }
+    
+    log.info("Task %s submitted successfully", task.getId());
+    return task.getId();
+  }
+
+  /**
+   * Waits for a task to complete successfully.
+   */
+  public boolean waitForTaskToComplete(String taskId, int timeoutSeconds) throws Exception
+  {
+    Optional<String> coordinatorUrl = getCoordinatorUrl();
+    if (coordinatorUrl.isEmpty()) {
+      throw new IllegalStateException("Coordinator URL not available");
+    }
+
+    HttpClient httpClient = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(30))
+        .build();
+
+    String taskStatusUrl = coordinatorUrl.get() + "/druid/indexer/v1/task/" + taskId + "/status";
+    
+    boolean taskCompleted = false;
+    int waitedSeconds = 0;
+    
+    log.info("Waiting for task %s to complete (timeout: %d seconds)...", taskId, timeoutSeconds);
+    
+    while (!taskCompleted && waitedSeconds < timeoutSeconds) {
+      HttpRequest statusRequest = HttpRequest.newBuilder()
+          .uri(URI.create(taskStatusUrl))
+          .GET()
+          .timeout(Duration.ofSeconds(10))
+          .build();
+
+      HttpResponse<String> statusResponse = httpClient.send(statusRequest, 
+          HttpResponse.BodyHandlers.ofString());
+      
+      if (statusResponse.statusCode() == 200) {
+        String responseBody = statusResponse.body();
+        if (responseBody.contains("\"status\":\"SUCCESS\"")) {
+          log.info("Task %s completed successfully", taskId);
+          taskCompleted = true;
+          break;
+        } else if (responseBody.contains("\"status\":\"FAILED\"")) {
+          throw new RuntimeException("Task " + taskId + " failed: " + responseBody);
+        }
+        
+        // Log progress every 30 seconds
+        if (waitedSeconds % 30 == 0) {
+          log.info("Task %s still running after %d seconds...", taskId, waitedSeconds);
+        }
+      } else {
+        log.warn("Failed to get task status (HTTP %d): %s", 
+            statusResponse.statusCode(), statusResponse.body());
+      }
+      
+      Thread.sleep(5000);
+      waitedSeconds += 5;
+    }
+    
+    if (!taskCompleted) {
+      log.warn("Task %s did not complete within %d seconds", taskId, timeoutSeconds);
+    }
+    
+    return taskCompleted;
   }
 
   private void applyRBACManifests(KubernetesClient client)

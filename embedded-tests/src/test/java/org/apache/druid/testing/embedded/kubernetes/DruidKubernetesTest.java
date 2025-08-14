@@ -22,6 +22,9 @@ package org.apache.druid.testing.embedded.kubernetes;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.apps.StatefulSetList;
+import org.apache.druid.indexing.common.task.IndexTask;
+import org.apache.druid.testing.embedded.indexing.MoreResources;
+import org.apache.druid.testing.embedded.indexing.Resources;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -31,6 +34,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -176,5 +180,23 @@ public class DruidKubernetesTest extends KubernetesTestBase
                                  + uniqueLabel);
       }
     }
+  }
+
+  @Test
+  @Timeout(value = 5, unit = TimeUnit.MINUTES)
+  public void test_cluster_ingestionTask() throws Exception
+  {
+    String dataSource = "test_datasource_" + UUID.randomUUID().toString().replace("-", "");
+    String taskId = "index_task_" + UUID.randomUUID().toString().replace("-", "");
+    
+    IndexTask task = MoreResources.Task.BASIC_INDEX.get()
+        .inlineInputSourceWithData(Resources.InlineData.CSV_10_DAYS)
+        .dataSource(dataSource)
+        .withId(taskId);
+
+    boolean taskCompleted = druidCluster.submitTaskAndWait(task, 240);
+    
+    Assertions.assertTrue(taskCompleted, 
+        "Task should complete successfully within 240 seconds");
   }
 }
