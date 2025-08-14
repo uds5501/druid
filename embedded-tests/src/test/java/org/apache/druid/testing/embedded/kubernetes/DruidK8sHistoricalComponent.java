@@ -184,7 +184,7 @@ public class DruidK8sHistoricalComponent extends DruidK8sComponent
   }
 
   @Override
-  protected String getPodLabel()
+  public String getPodLabel()
   {
     return "druid-" + getMetadataName() + "-" + getTier();
   }

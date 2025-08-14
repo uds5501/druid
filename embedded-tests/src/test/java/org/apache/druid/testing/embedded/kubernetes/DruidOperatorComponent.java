@@ -120,7 +120,7 @@ public class DruidOperatorComponent implements K8sComponent
           .withNewMetadata()
           .withName(namespace)
           .endMetadata()
-          .build()).create();
+          .build()).createOrReplace();
     } catch (Exception e) {
       log.error("Error creating namespace %s: %s", namespace, e.getMessage());
     }

@@ -26,6 +26,7 @@ import org.apache.druid.testing.embedded.indexing.Resources;
 import java.io.FileInputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Component that orchestrates a complete Druid cluster deployment.
@@ -61,10 +62,8 @@ public class DruidClusterComponent implements K8sComponent
   {
     log.info("Initializing %s...", getComponentName());
     
-    // Apply RBAC manifests first
     applyRBACManifests(client);
     
-    // Apply single Druid manifest with all nodes
     applyDruidClusterManifest(client);
     
     log.info("%s initialization completed", getComponentName());
@@ -88,17 +87,11 @@ public class DruidClusterComponent implements K8sComponent
   {
     log.info("Cleaning up %s...", getComponentName());
     
-    // Clean up individual Druid custom resources for each component
     for (DruidK8sComponent service : druidServices) {
       try {
-        String componentName = "druid-" + service.getDruidServiceType();
-        client.genericKubernetesResources("druid.apache.org/v1alpha1", "Druid")
-            .inNamespace(namespace)
-            .withName(componentName)
-            .delete();
-        log.info("Deleted Druid custom resource for %s", service.getDruidServiceType());
+        service.cleanup(client);
       } catch (Exception e) {
-        log.error("Error deleting Druid custom resource for %s: %s", service.getDruidServiceType(), e.getMessage());
+        log.error("Error cleaning up %s: %s", service.getDruidServiceType(), e.getMessage());
       }
     }
     
@@ -120,11 +113,6 @@ public class DruidClusterComponent implements K8sComponent
     return namespace;
   }
 
-  public String getDruidImage()
-  {
-    return druidImage;
-  }
-
   public String getClusterName()
   {
     return clusterName;
@@ -135,28 +123,25 @@ public class DruidClusterComponent implements K8sComponent
     return new ArrayList<>(druidServices);
   }
 
-  public DruidK8sComponent getCoordinator()
+  public Optional<DruidK8sComponent> getCoordinator()
   {
     return druidServices.stream()
         .filter(service -> "coordinator".equals(service.getDruidServiceType()))
-        .findFirst()
-        .orElse(null);
+        .findFirst();
   }
 
-  public DruidK8sComponent getBroker()
+  public Optional<DruidK8sComponent> getBroker()
   {
     return druidServices.stream()
         .filter(service -> "broker".equals(service.getDruidServiceType()))
-        .findFirst()
-        .orElse(null);
+        .findFirst();
   }
 
-  public DruidK8sComponent getRouter()
+  public Optional<DruidK8sComponent> getRouter()
   {
     return druidServices.stream()
         .filter(service -> "router".equals(service.getDruidServiceType()))
-        .findFirst()
-        .orElse(null);
+        .findFirst();
   }
 
   public List<DruidK8sHistoricalComponent> getHistoricals()
@@ -167,51 +152,27 @@ public class DruidClusterComponent implements K8sComponent
         .collect(java.util.stream.Collectors.toList());
   }
 
-  public String getCoordinatorUrl()
+  public Optional<String> getCoordinatorUrl()
   {
-    DruidK8sComponent coordinator = getCoordinator();
-    if (coordinator != null) {
-      return String.format("http://%s.%s.svc.cluster.local:%d", 
-          coordinator.getClusterName() + "-coordinator", 
-          namespace, 
-          coordinator.getDruidPort());
-    }
-    return null;
+    return getCoordinator().map(DruidK8sComponent::getServiceUrl);
   }
 
-  public String getBrokerUrl()
+  public Optional<String> getBrokerUrl()
   {
-    DruidK8sComponent broker = getBroker();
-    if (broker != null) {
-      return String.format("http://%s.%s.svc.cluster.local:%d", 
-          broker.getClusterName() + "-broker", 
-          namespace, 
-          broker.getDruidPort());
-    }
-    return null;
+    return getBroker().map(DruidK8sComponent::getServiceUrl);
   }
 
-  public String getRouterUrl()
+  public Optional<String> getRouterUrl()
   {
-    DruidK8sComponent router = getRouter();
-    if (router != null) {
-      return String.format("http://%s.%s.svc.cluster.local:%d", 
-          router.getClusterName() + "-router", 
-          namespace, 
-          router.getDruidPort());
-    }
-    return null;
+    return getRouter().map(DruidK8sComponent::getServiceUrl);
   }
 
   private void applyRBACManifests(KubernetesClient client)
   {
-    log.info("Applying Druid RBAC manifest...");
-
     try {
       client.load(new FileInputStream(Resources.getFileForResource(RBAC_MANIFEST_PATH)))
           .inNamespace(namespace)
           .createOrReplace();
-      log.info("Applied RBAC manifest: %s", RBAC_MANIFEST_PATH);
     } catch (Exception e) {
       log.error("Error applying RBAC manifest %s: %s", RBAC_MANIFEST_PATH, e.getMessage());
       throw new RuntimeException("Failed to apply RBAC manifest: " + RBAC_MANIFEST_PATH, e);
@@ -221,8 +182,6 @@ public class DruidClusterComponent implements K8sComponent
   private void cleanupRBACResources(KubernetesClient client)
   {
     try {
-      log.info("Cleaning up Druid RBAC resources...");
-      
       client.rbac().roles().inNamespace(namespace).withName("druid-cluster").delete();
       client.rbac().roleBindings().inNamespace(namespace).withName("druid-cluster").delete();
       
@@ -230,28 +189,6 @@ public class DruidClusterComponent implements K8sComponent
     } catch (Exception e) {
       log.error("Error cleaning up RBAC resources: %s", e.getMessage());
     }
-  }
-
-  public void printClusterInfo()
-  {
-    log.info("=== DRUID CLUSTER INFO ===");
-    log.info("Cluster Name: %s", clusterName);
-    log.info("Namespace: %s", namespace);
-    log.info("Druid Image: %s", druidImage);
-    log.info("Services:");
-    
-    for (DruidK8sComponent service : druidServices) {
-      log.info("  - %s: %s:%d", 
-          service.getDruidServiceType(), 
-          service.getClusterName() + "-" + service.getDruidServiceType(), 
-          service.getDruidPort());
-    }
-    
-    log.info("URLs:");
-    log.info("  - Coordinator: %s", getCoordinatorUrl());
-    log.info("  - Broker: %s", getBrokerUrl());
-    log.info("  - Router (Web Console): %s", getRouterUrl());
-    log.info("========================");
   }
   
   /**

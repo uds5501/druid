@@ -26,6 +26,7 @@ import org.apache.druid.k8s.simulate.K3SResource;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Base class for Kubernetes-based tests. Provides a K3s cluster
@@ -35,18 +36,55 @@ public abstract class KubernetesTestBase
 {
   private static final Logger log = new Logger(KubernetesTestBase.class);
   
-  private final K3SResource k3sContainer = new K3SResource();
-  private KubernetesClient client;
-  private final List<K8sComponent> components = new ArrayList<>();
+  private static final K3SResource k3sContainer = new K3SResource();
+  private static KubernetesClient client;
+  private static List<ComponentEntry> components = new ArrayList<>();
 
-  protected void startK3SContainer()
+  /**
+   * Internal class to track component state
+   */
+  private static class ComponentEntry
+  {
+    private final K8sComponent component;
+    private boolean initialized;
+    private final boolean cleanupInEachTest;
+
+    public ComponentEntry(K8sComponent component, boolean cleanupInEachTest)
+    {
+      this.component = component;
+      this.initialized = false;
+      this.cleanupInEachTest = cleanupInEachTest;
+    }
+
+    public K8sComponent getComponent()
+    {
+      return component;
+    }
+
+    public boolean isInitialized()
+    {
+      return initialized;
+    }
+
+    public void setInitialized(boolean initialized)
+    {
+      this.initialized = initialized;
+    }
+
+    public boolean shouldCleanupInEachTest()
+    {
+      return cleanupInEachTest;
+    }
+  }
+
+  protected static void startK3SContainer()
   {
     log.info("Starting K3s conatiner...");
     k3sContainer.start();
-    this.client = k3sContainer.getClient();
+    client = k3sContainer.getClient();
   }
 
-  protected void stopK3SContainer()
+  protected static void stopK3SContainer()
   {
     log.info("Stopping K3s cluster...");
     k3sContainer.stop();
@@ -59,23 +97,41 @@ public abstract class KubernetesTestBase
 
   /**
    * Add a kubernetes component to be deployed in k3s container.
+   * By default, components are cleaned up in each test.
    *
    * @param component the component to add
    */
-  protected void addKubernetesComponent(K8sComponent component)
+  protected static void addKubernetesComponent(K8sComponent component)
   {
-    components.add(component);
+    components.add(new ComponentEntry(component, true));
+  }
+
+  /**
+   * Add a kubernetes component to be deployed in k3s container.
+   *
+   * @param component the component to add
+   * @param cleanupInEachTest whether this component should be cleaned up in each test
+   */
+  protected static void addKubernetesComponent(K8sComponent component, boolean cleanupInEachTest)
+  {
+    components.add(new ComponentEntry(component, cleanupInEachTest));
   }
 
   /**
    * Initialize all registered components in order.
    */
-  protected void initializeComponents()
+  protected static void initializeComponents()
   {
-    for (K8sComponent component : components) {
+    for (ComponentEntry entry : components) {
+      if (entry.isInitialized()) {
+        log.info("Skipping already initialized component: %s", entry.getComponent().getComponentName());
+        continue;
+      }
+      final K8sComponent component = entry.getComponent();
       try {
         component.initialize(client);
         component.waitUntilReady(client);
+        entry.setInitialized(true);
       } catch (Exception e) {
         log.error("Failed to initialize %s: %s", component.getComponentName(), e.getMessage());
         throw new RuntimeException("Component initialization failed", e);
@@ -83,20 +139,41 @@ public abstract class KubernetesTestBase
     }
   }
 
-  protected void cleanupComponents()
+  protected static void cleanupComponents(boolean skipStatic)
   {
+    log.info("Starting cleanup with skipStatic=%s, component count=%d", skipStatic, components.size());
+    
     for (int i = components.size() - 1; i >= 0; i--) {
-      K8sComponent component = components.get(i);
+      ComponentEntry entry = components.get(i);
+      
+      log.info("Checking component %s: initialized=%s, cleanupInEachTest=%s", 
+          entry.getComponent().getComponentName(), entry.isInitialized(), entry.shouldCleanupInEachTest());
+      
+      if (!entry.isInitialized()) {
+        log.info("Skipping uninitialized component: %s", entry.getComponent().getComponentName());
+        continue;
+      }
+      
+      if (!entry.shouldCleanupInEachTest() && !skipStatic) {
+        log.info("Skipping static component: %s", entry.getComponent().getComponentName());
+        continue;
+      }
+      
+      K8sComponent component = entry.getComponent();
       try {
+        log.info("Cleaning up component: %s", component.getComponentName());
         component.cleanup(client);
+        components.remove(i);
+        log.info("Successfully cleaned up and removed: %s", component.getComponentName());
       } catch (Exception e) {
         log.error("Error cleaning up %s: %s", component.getComponentName(), e.getMessage());
       }
     }
-    components.clear();
+    
+    log.info("Cleanup completed, remaining component count=%d", components.size());
   }
 
-  protected void createNamespace(String namespace)
+  protected static void createNamespace(String namespace)
   {
     try {
       client.namespaces().resource(new NamespaceBuilder()
@@ -108,40 +185,5 @@ public abstract class KubernetesTestBase
       log.error("Error creating namespace %s: %s", namespace, e.getMessage());
       throw new RuntimeException("Failed to create namespace", e);
     }
-  }
-
-  /**
-   * Get cluster state for debugging purposes.
-   */
-  protected void printClusterState()
-  {
-    log.info("=== Kubernetes Cluster State ===");
-
-    try {
-      printNamespaces();
-      printAllPods();
-      log.info("=== End Cluster State ===");
-    } catch (Exception e) {
-      log.error("Error retrieving cluster state: %s", e.getMessage());
-    }
-  }
-
-  private void printNamespaces()
-  {
-    log.info("--- Namespaces ---");
-    client.namespaces().list().getItems().forEach(ns ->
-        log.info("- %s", ns.getMetadata().getName())
-    );
-  }
-
-  private void printAllPods()
-  {
-    log.info("--- All Pods ---");
-    client.pods().inAnyNamespace().list().getItems().forEach(pod ->
-        log.info("- %s (namespace: %s, status: %s)", 
-            pod.getMetadata().getName(),
-            pod.getMetadata().getNamespace(),
-            pod.getStatus().getPhase())
-    );
   }
 }

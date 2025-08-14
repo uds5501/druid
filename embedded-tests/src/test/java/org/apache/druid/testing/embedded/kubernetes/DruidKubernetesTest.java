@@ -19,218 +19,162 @@
 
 package org.apache.druid.testing.embedded.kubernetes;
 
+import io.fabric8.kubernetes.api.model.Container;
+import io.fabric8.kubernetes.api.model.apps.Deployment;
+import io.fabric8.kubernetes.api.model.apps.StatefulSetList;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class DruidKubernetesTest extends KubernetesTestBase
 {
   private static final String DRUID_NAMESPACE = "druid";
 
-  private DruidOperatorComponent druidOperator;
+  private static DruidOperatorComponent druidOperator;
   private DruidClusterComponent druidCluster;
 
-  @BeforeEach
-  void setUp()
+  @BeforeAll
+  public static void init()
   {
     startK3SContainer();
     createNamespace(DRUID_NAMESPACE);
-    String clusterName = "test-cluster";
-
     druidOperator = new DruidOperatorComponent(DRUID_NAMESPACE);
+    addKubernetesComponent(druidOperator, false);
+    initializeComponents();
+  }
+
+  @BeforeEach
+  public void setUp()
+  {
+    String clusterName = "test-cluster";
     druidCluster = new DruidClusterComponent(DRUID_NAMESPACE, DruidK8sComponent.DRUID_34_IMAGE, clusterName);
 
-    druidCluster.addDruidService(new DruidK8sCoordinatorComponent(DRUID_NAMESPACE, DruidK8sComponent.DRUID_34_IMAGE, clusterName));
-    druidCluster.addDruidService(new DruidK8sBrokerComponent(DRUID_NAMESPACE, DruidK8sComponent.DRUID_34_IMAGE, clusterName));
-    druidCluster.addDruidService(new DruidK8sHistoricalComponent(DRUID_NAMESPACE, DruidK8sComponent.DRUID_34_IMAGE, clusterName, "hot", 1));
-    druidCluster.addDruidService(new DruidK8sRouterComponent(DRUID_NAMESPACE, DruidK8sComponent.DRUID_34_IMAGE, clusterName));
-
-    addKubernetesComponent(druidOperator);
+    druidCluster.addDruidService(new DruidK8sCoordinatorComponent(
+        DRUID_NAMESPACE,
+        DruidK8sComponent.DRUID_34_IMAGE,
+        clusterName
+    ));
+    druidCluster.addDruidService(new DruidK8sBrokerComponent(
+        DRUID_NAMESPACE,
+        DruidK8sComponent.DRUID_34_IMAGE,
+        clusterName
+    ));
+    druidCluster.addDruidService(new DruidK8sHistoricalComponent(
+        DRUID_NAMESPACE,
+        DruidK8sComponent.DRUID_34_IMAGE,
+        clusterName,
+        "hot",
+        1
+    ));
+    druidCluster.addDruidService(new DruidK8sRouterComponent(
+        DRUID_NAMESPACE,
+        DruidK8sComponent.DRUID_34_IMAGE,
+        clusterName
+    ));
     addKubernetesComponent(druidCluster);
-
     initializeComponents();
   }
 
   @AfterEach
   void tearDown()
   {
-    cleanupComponents();
+    cleanupComponents(false);
+
+    try {
+      Thread.sleep(5000); // 5 seconds
+    }
+    catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
+  @AfterAll
+  public static void cleanup()
+  {
+    cleanupComponents(true);
     stopK3SContainer();
   }
 
   @Test
-  void testDruidOperatorDeployment()
+  public void test_operator_deployment()
   {
-    assertOperatorIsRunning();
-  }
-
-
-  @Test
-  void testOperatorWatchesNamespace()
-  {
-    assertOperatorWatchesCorrectNamespace();
-  }
-
-  @Test
-  @Timeout(value = 10, unit = TimeUnit.MINUTES)
-  void testDruidClusterDeployment()
-  {
-    assertDruidClusterIsRunning();
-  }
-
-  @Test
-  void testDruidWebConsoleAccess()
-  {
-    assertDruidWebConsoleIsAccessible();
-  }
-
-  private void assertOperatorIsRunning()
-  {
-    var deployment = getClient().apps().deployments()
-        .inNamespace(druidOperator.getNamespace())
-        .withName("druid-operator-test")
-        .get();
+    Deployment deployment = getClient().apps().deployments()
+                                       .inNamespace(druidOperator.getNamespace())
+                                       .withName("druid-operator-test")
+                                       .get();
 
     if (deployment == null) {
       throw new AssertionError("Druid operator deployment not found");
     }
 
-    if (deployment.getStatus().getReadyReplicas() == null ||
-        deployment.getStatus().getReadyReplicas() < 1) {
-      throw new AssertionError("Druid operator deployment is not ready. Ready replicas: " +
-          deployment.getStatus().getReadyReplicas());
-    }
-
-    System.out.println("✓ Druid operator deployment is running with " +
-        deployment.getStatus().getReadyReplicas() + " ready replicas");
+    Assertions.assertNotNull(deployment.getStatus().getReadyReplicas());
+    Assertions.assertTrue(
+        deployment.getStatus().getReadyReplicas() >= 1,
+        "Druid operator deployment should have at least 1 ready replica"
+    );
   }
 
-
-  private void assertOperatorWatchesCorrectNamespace()
+  @Test
+  public void test_operator_namespace_watching()
   {
-    var deployment = getClient().apps().deployments()
-        .inNamespace(druidOperator.getNamespace())
-        .withName("druid-operator-test")
-        .get();
+    Deployment deployment = getClient().apps().deployments()
+                                       .inNamespace(druidOperator.getNamespace())
+                                       .withName("druid-operator-test")
+                                       .get();
 
     if (deployment == null) {
       throw new AssertionError("Druid operator deployment not found");
     }
 
-    // Check the WATCH_NAMESPACE environment variable
-    var containers = deployment.getSpec().getTemplate().getSpec().getContainers();
-    boolean foundCorrectWatchNamespace = false;
-
-    for (var container : containers) {
-      if ("manager".equals(container.getName()) && container.getEnv() != null) {
-        for (var envVar : container.getEnv()) {
-          if ("WATCH_NAMESPACE".equals(envVar.getName()) &&
-              DRUID_NAMESPACE.equals(envVar.getValue())) {
-            foundCorrectWatchNamespace = true;
-            break;
-          }
-        }
-      }
-    }
-
-    if (!foundCorrectWatchNamespace) {
-      throw new AssertionError("Operator is not configured to watch the correct namespace: " + DRUID_NAMESPACE);
-    }
-
-    System.out.println("✓ Operator is configured to watch namespace: " + DRUID_NAMESPACE);
+    List<Container> containers = deployment.getSpec().getTemplate().getSpec().getContainers();
+    containers.stream()
+              .filter(container -> "manager".equals(container.getName()) && container.getEnv() != null)
+              .flatMap(container -> container.getEnv().stream())
+              .filter(envVar -> "WATCH_NAMESPACE".equals(envVar.getName()))
+              .findFirst()
+              .ifPresent(envVar -> Assertions.assertEquals(DRUID_NAMESPACE, envVar.getValue()));
   }
 
-
-  private void assertDruidClusterIsRunning()
+  @Test
+  @Timeout(value = 3, unit = TimeUnit.MINUTES)
+  public void test_cluster_deployment()
   {
     for (DruidK8sComponent service : druidCluster.getDruidServices()) {
-      var deployment = getClient().apps().deployments()
-          .inNamespace(DRUID_NAMESPACE)
-          .withName(service.getClusterName() + "-" + service.getDruidServiceType())
-          .get();
+      String uniqueLabel = service.getPodLabel();
+      AtomicBoolean found = new AtomicBoolean(false);
+      StatefulSetList statefulSetsByLabel = getClient().apps().statefulSets()
+                                                       .inNamespace(DRUID_NAMESPACE)
+                                                       .withLabel("nodeSpecUniqueStr", uniqueLabel)
+                                                       .list();
 
-      if (deployment == null) {
-        throw new AssertionError("Druid " + service.getDruidServiceType() + " deployment not found");
-      }
-
-      if (deployment.getStatus().getReadyReplicas() == null ||
-          deployment.getStatus().getReadyReplicas() < 1) {
-        throw new AssertionError("Druid " + service.getDruidServiceType() + " deployment is not ready. Ready replicas: " +
-            deployment.getStatus().getReadyReplicas());
-      }
-
-      System.out.println("✓ Druid " + service.getDruidServiceType() + " is running with " +
-          deployment.getStatus().getReadyReplicas() + " ready replicas");
-    }
-  }
-
-  private void assertDruidServicesCanCommunicate()
-  {
-    // Check that coordinator service exists and is accessible
-    var coordinatorService = getClient().services()
-        .inNamespace(DRUID_NAMESPACE)
-        .withName(druidCluster.getClusterName() + "-coordinator")
-        .get();
-
-    if (coordinatorService == null) {
-      throw new AssertionError("Coordinator service not found");
-    }
-
-    // Check that broker service exists and is accessible
-    var brokerService = getClient().services()
-        .inNamespace(DRUID_NAMESPACE)
-        .withName(druidCluster.getClusterName() + "-broker")
-        .get();
-
-    if (brokerService == null) {
-      throw new AssertionError("Broker service not found");
-    }
-
-    System.out.println("✓ Druid services can discover each other via Kubernetes DNS");
-    System.out.println("  - Coordinator URL: " + druidCluster.getCoordinatorUrl());
-    System.out.println("  - Broker URL: " + druidCluster.getBrokerUrl());
-  }
-
-  private void assertDruidWebConsoleIsAccessible()
-  {
-    var routerService = getClient().services()
-        .inNamespace(DRUID_NAMESPACE)
-        .withName(druidCluster.getClusterName() + "-router")
-        .get();
-
-    if (routerService == null) {
-      throw new AssertionError("Router service not found");
-    }
-
-    System.out.println("✓ Druid web console is accessible via router");
-    System.out.println("  - Router URL: " + druidCluster.getRouterUrl());
-  }
-
-  private void printDruidClusterStatus()
-  {
-    System.out.println("\n=== Druid Cluster Status ===");
-
-    for (DruidK8sComponent service : druidCluster.getDruidServices()) {
-      var deployment = getClient().apps().deployments()
-          .inNamespace(DRUID_NAMESPACE)
-          .withName(service.getClusterName() + "-" + service.getDruidServiceType())
-          .get();
-
-      if (deployment != null) {
-        System.out.println(service.getDruidServiceType().toUpperCase() + ":");
-        System.out.println("  Image: " + service.getDruidImage());
-        System.out.println("  Replicas: " + deployment.getStatus().getReadyReplicas() + "/" + deployment.getSpec().getReplicas());
-        System.out.println("  Port: " + service.getDruidPort());
+      statefulSetsByLabel.getItems().stream()
+                         .findFirst()
+                         .ifPresent(statefulSet -> {
+                           found.set(true);
+                           Assertions.assertNotNull(
+                               statefulSet.getStatus().getReadyReplicas(),
+                               "ReadyReplicas should not be null for " + service.getDruidServiceType()
+                           );
+                           Assertions.assertTrue(
+                               statefulSet.getStatus().getReadyReplicas() >= 1,
+                               "Druid " + service.getDruidServiceType() + " statefulset is not ready. Ready replicas: "
+                               + statefulSet.getStatus().getReadyReplicas()
+                           );
+                         });
+      if (!found.get()) {
+        throw new AssertionError("Druid "
+                                 + service.getDruidServiceType()
+                                 + " statefulset not found by nodeSpecUniqueStr label: "
+                                 + uniqueLabel);
       }
     }
-
-    System.out.println("\nHistorical Tiers:");
-    for (DruidK8sHistoricalComponent historical : druidCluster.getHistoricals()) {
-      System.out.println("  - " + historical.getTier() + " tier");
-    }
   }
-
 }

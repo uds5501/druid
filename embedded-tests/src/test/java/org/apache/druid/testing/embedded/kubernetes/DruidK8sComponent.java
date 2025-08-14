@@ -79,6 +79,19 @@ public abstract class DruidK8sComponent implements K8sComponent
   public abstract int getDruidPort();
 
   /**
+   * Get the service URL for this Druid component.
+   * 
+   * @return the service URL in the format suitable for Kubernetes DNS
+   */
+  public String getServiceUrl()
+  {
+    return String.format("http://%s.%s.svc.cluster.local:%d", 
+        getMetadataName(), 
+        namespace, 
+        getDruidPort());
+  }
+
+  /**
    * Get the runtime properties specific to this Druid service.
    *
    * @return the runtime properties as a string
@@ -241,7 +254,7 @@ public abstract class DruidK8sComponent implements K8sComponent
     }
   }
 
-  protected String getPodLabel()
+  public String getPodLabel()
   {
     return "druid-" + getMetadataName() + "-" + getDruidServiceType();
   }
@@ -255,7 +268,7 @@ public abstract class DruidK8sComponent implements K8sComponent
           .withName(getMetadataName())
           .delete();
     } catch (Exception e) {
-      log.error("Error during Druid %s cleanup: %s", getDruidServiceType(), e.getMessage());
+      log.error("Error during %s cleanup: %s", getDruidServiceType(), e.getMessage());
     }
   }
 
