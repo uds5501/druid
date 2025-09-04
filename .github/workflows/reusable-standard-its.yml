@@ -91,6 +91,13 @@ jobs:
           echo "${MVN} verify -pl integration-tests -P integration-tests ${{ inputs.testing_groups }} -Djvm.runtime=${{ inputs.runtime_jdk }} -Dit.indexer=${{ inputs.use_indexer }} ${MAVEN_SKIP} -Doverride.config.path=${{ inputs.override_config_path }}"
           ${MVN} verify -pl integration-tests -P integration-tests ${{ inputs.testing_groups }} -Djvm.runtime=${{ inputs.runtime_jdk }} -Dit.indexer=${{ inputs.use_indexer }} ${MAVEN_SKIP} -Doverride.config.path=${{ inputs.override_config_path }}
 
+      - name: Verify shared logs existence
+        run: |
+          echo "Checking if shared directory itself exists or not"
+          ls -l ~
+          echo "Checking if shared logs director was populated or not"
+          ls -l ~/shared
+
       - name: Collect docker logs on failure
         if: ${{ failure() && steps.run-it.conclusion == 'failure' }}
         run: |
